@@ -25,5 +25,6 @@ object QueryTags {
   val cryptography           = "cryptography"
   val remoteCodeExecution    = "remote-code-execution"
 
-  val ppAssign                     = "ppAssign"
+  val ppAssign   = "ppAssign"
+  val ppGeneral = "ppGeneral"
 }
