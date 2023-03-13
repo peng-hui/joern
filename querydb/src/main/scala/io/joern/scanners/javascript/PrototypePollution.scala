@@ -31,18 +31,18 @@ object PrototypePollution extends QueryBundle {
         for (pp <- possiblePollution) {
           breakable {
             def methodName = pp.location.methodShortName
-            def valReachable = pp.argument(2).reachableBy(cpg.method.name(methodName).parameter.nameNot("this"))
+            def valReachable = pp.argument(2).reachableBy(cpg.method.name(methodName++"|anonymous.*").parameter.nameNot("this"))
             def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
             def indexArgument = indexAccessInAssignment.argument(2)
-            def indexArgumentTainted = indexArgument.where(_.reachableBy(cpg.method.name(methodName).parameter.nameNot("this")))
+            def indexArgumentTainted = indexArgument.where(_.reachableBy(cpg.method.name(methodName++"|anonymous.*").parameter.nameNot("this")))
             def identifierOrCall = indexAccessInAssignment.argument(1)
             if (identifierOrCall.isIdentifier.nonEmpty) {
                 if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
                     break()
                 }
             }
-            def lastArgumentTainted = identifierOrCall.reachableBy(cpg.call(Operators.indexAccess)).where(_.argument(2).reachableBy(cpg.method.name(methodName).parameter.nameNot("this")))
-            if (valReachable.size > 0 && indexAccessInAssignment.size > 0 && indexArgument.size > 0 && indexArgumentTainted.size > 0 && identifierOrCall.size > 0 && lastArgumentTainted.size > 0) {
+            def lastArgumentTainted = identifierOrCall.reachableBy(cpg.call(Operators.indexAccess)).where(_.argument(2).reachableBy(cpg.method.name(methodName++"|anonymous.*").parameter.nameNot("this")))
+            if (indexAccessInAssignment.size > 0 && indexArgument.size > 0 && indexArgumentTainted.size > 0 && identifierOrCall.size > 0 && lastArgumentTainted.size > 0) {
               idList = idList :+ pp.id
             }
           }
@@ -70,7 +70,7 @@ object PrototypePollution extends QueryBundle {
             def methodName = pp.location.methodShortName
             def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
             def indexArgument = indexAccessInAssignment.astChildren.order(2).isIdentifier
-            def indexArgumentTainted = indexArgument.where(_.reachableBy(cpg.method.name(methodName).parameter.nameNot("this")))
+            def indexArgumentTainted = indexArgument.where(_.reachableBy(cpg.method.name(methodName++"|anonymous.*").parameter.nameNot("this")))
             def identifierOrCall = if(indexAccessInAssignment.astChildren.order(1).isIdentifier.isEmpty){
                 indexAccessInAssignment.astChildren.order(1).isCall
             } else {
@@ -81,7 +81,7 @@ object PrototypePollution extends QueryBundle {
                       break()
                   }
             }
-            def lastArgumentTainted = identifierOrCall.reachableBy(cpg.call(Operators.indexAccess)).where(_.argument.reachableBy(cpg.method.name(methodName).parameter.nameNot("this")))
+            def lastArgumentTainted = identifierOrCall.reachableBy(cpg.call(Operators.indexAccess)).where(_.argument.reachableBy(cpg.method.name(methodName++"|anonymous.*").parameter.nameNot("this")))
             if (indexAccessInAssignment.size > 0 && indexArgument.size > 0 && indexArgumentTainted.size > 0 && identifierOrCall.size > 0 && lastArgumentTainted.size > 0) {
               idList = idList :+ pp.id
             }
