@@ -88,7 +88,7 @@ object PrototypePollution extends QueryBundle {
         }
         cpg.call.filter(node => idList.contains(node.id)).l
       }),
-      tags = List(QueryTags.ppAssign, QueryTags.default),
+      tags = List(QueryTags.pp, QueryTags.default),
     )
 
     @q
@@ -96,9 +96,9 @@ object PrototypePollution extends QueryBundle {
     Query.make(
       name = "prototype-pollution-general",
       author = "Tobiasfro",
-      title = "Allows user to change the prototype of an object",
+      title = "This assignment may alter Object.prototype if a malicious '__proto__' string is injected",
       description = """
-        |User can use the function to change the prototype of an object, allowing for prototype pollution
+        |Function can be used to change the prototype of an object, allowing for prototype pollution
         |""".stripMargin,
       score = 8,
       withStrRep({ cpg =>
