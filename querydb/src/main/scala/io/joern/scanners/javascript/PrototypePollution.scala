@@ -18,7 +18,7 @@ object PrototypePollution extends QueryBundle {
   @q
   def assignment(): Query =
     Query.make(
-      name = "prototype-pollution-assignment",
+      name = "prototype-pollution",
       author = "Tobiasfro",
       title = "This assignment may alter Object.prototype if a malicious '__proto__' string is injected",
       description = """
