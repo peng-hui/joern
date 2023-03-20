@@ -30,7 +30,11 @@ object PrototypePollution extends QueryBundle {
           _.name(Operators.assignment).reachableBy(
             cpg.method.parameter.nameNot("this")
             )
-          )
+          ) ++ cpg.call.where(
+            _.name(Operators.assignment).reachableBy(
+              cpg.identifier.evalType("IArguments").astParent.isCall
+              )
+            )
         var idList : List[Long] = List()
         for (pp <- possiblePollution) {
           breakable {
@@ -48,11 +52,15 @@ object PrototypePollution extends QueryBundle {
             }
             def valReachable = pp.argument(2).ast.where(
                 _.isIdentifier.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
+            ) ++ (pp.argument(2).ast.isCall ++ pp.argument(2).ast.isIdentifier).reachableBy(
+                cpg.identifier.evalType("IArguments").astParent.isCall
             )
             def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
             def indexArgument = indexAccessInAssignment.argument(2)
             def indexArgumentTainted = indexArgument.where(
               _.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
+              ) ++ indexArgument.where(
+                _.reachableBy(cpg.identifier.evalType("IArguments").astParent.isCall)
               )
             def identifierOrCall = indexAccessInAssignment.argument(1)
             if (identifierOrCall.isIdentifier.nonEmpty) {
@@ -65,6 +73,12 @@ object PrototypePollution extends QueryBundle {
               ).where(
                 _.argument(2).reachableBy(
                   cpg.method.fullName(methodNames).parameter.nameNot("this")
+                )
+              ) ++ identifierOrCall.reachableBy(
+                cpg.call(Operators.indexAccess)
+              ).where(
+                _.argument(2).reachableBy(
+                  cpg.identifier.evalType("IArguments").astParent.isCall
                 )
               )
             if (valReachable.size > 0 && indexAccessInAssignment.size > 0 && indexArgument.size > 0 && indexArgumentTainted.size > 0 && identifierOrCall.size > 0 && lastArgumentTainted.size > 0) {
