@@ -26,18 +26,31 @@ object PrototypePollution extends QueryBundle {
         |""".stripMargin,
       score = 8,
       withStrRep({ cpg =>
-        def possiblePollution = cpg.call.where(
-            _.name(Operators.assignment).reachableBy(
-              cpg.method.parameter.nameNot("this")
-            )
-          ) ++ cpg.call.where(
-              _.name(Operators.assignment).reachableBy(
-                cpg.identifier.evalType("IArguments").astParent.isCall
-              )
-            )
+        def assignmentWithIndexAccess = cpg.call.where(
+          _.name(Operators.assignment).argument(1).isCall.name(Operators.indexAccess)
+        )
+    
+        def possiblePollution = assignmentWithIndexAccess.where(
+          _.reachableBy(
+            cpg.method.parameter.nameNot("this")
+          )
+        ) ++ assignmentWithIndexAccess.where(
+          _.reachableBy(
+            cpg.identifier.evalType("IArguments").astParent.isCall
+          )
+        )
         var idList : List[Long] = List()
         for (pp <- possiblePollution) {
           breakable {
+
+            def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
+            def identifierOrCall = indexAccessInAssignment.argument(1)
+            if (identifierOrCall.isIdentifier.nonEmpty) {
+                if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
+                    break()
+                }
+            }
+            
             var nameArr = pp.location.methodFullName
             var methodNames = nameArr
             while(nameArr.splitAt(nameArr.lastIndexOf(":"))._2 != ":program"){
@@ -54,14 +67,8 @@ object PrototypePollution extends QueryBundle {
               _.isIdentifier.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
             ) ++ (pp.argument(2).ast.isCall ++ pp.argument(2).ast.isIdentifier).reachableBy(
               cpg.identifier.evalType("IArguments").astParent.isCall
-            )
-            def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
-            def identifierOrCall = indexAccessInAssignment.argument(1)
-            if (identifierOrCall.isIdentifier.nonEmpty) {
-                if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
-                    break()
-                }
-            }
+            ) ++ pp.argument(2).where(_.code("\\{\\}"))
+            
             def indexArgument = indexAccessInAssignment.argument(2)
             def indexArgumentTainted = indexArgument.where(
                 _.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
@@ -76,6 +83,8 @@ object PrototypePollution extends QueryBundle {
                 _.argument(2).reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
               ) ++ identifierOrCall.reachableBy(
                 cpg.call(Operators.indexAccess)
+              ).filterNot(
+                node => node.id == indexAccessInAssignment.id.l.head || (node.lineNumber.get == identifierOrCall.lineNumber.l.head && pp.argument(2).id == node.id)
               ).where(
                 _.argument(2).reachableBy(
                   cpg.identifier.evalType("IArguments").astParent.isCall
@@ -86,7 +95,7 @@ object PrototypePollution extends QueryBundle {
             }
           }
         }
-        cpg.call.filter(node => idList.contains(node.id)).l
+        cpg.call.filter(node => idList.contains(node.id)).dedup.l
       }),
       tags = List(QueryTags.pp, QueryTags.default),
     )
