@@ -26,5 +26,4 @@ object QueryTags {
   val remoteCodeExecution    = "remote-code-execution"
 
   val pp        = "pp"
-  val ppGeneral = "ppGeneral"
 }
