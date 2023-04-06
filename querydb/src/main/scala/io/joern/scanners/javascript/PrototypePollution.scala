@@ -39,11 +39,13 @@ object PrototypePollution extends QueryBundle {
             cpg.identifier.evalType("IArguments").astParent.isCall
           )
         )
+
         var idList : List[Long] = List()
+
         for (pp <- possiblePollution) {
           breakable {
-
             def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
+
             def identifierOrCall = indexAccessInAssignment.argument(1)
             if (identifierOrCall.isIdentifier.nonEmpty) {
                 if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
@@ -58,29 +60,40 @@ object PrototypePollution extends QueryBundle {
               nameArr = nameArr.splitAt(nameArr.lastIndexOf(":"))._1
               methodNames += nameArr
             }
+
             def recursiveMethodCalls = cpg.method.fullName(methodNames).ast.isReturn.ast.isCall.methodFullName.filterNot(_.matches(".*operator.*|.*unknownFullName.*")).dedup
             for(recursiveMethodCall <- recursiveMethodCalls){
                 methodNames += "|"
                 methodNames += recursiveMethodCall
             }
+
             def valReachable = pp.argument(2).ast.where(
-              _.isIdentifier.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
+              _.isIdentifier.reachableBy(
+                cpg.method.fullName(methodNames).parameter.nameNot("this")
+              )
             ) ++ (pp.argument(2).ast.isCall ++ pp.argument(2).ast.isIdentifier).reachableBy(
               cpg.identifier.evalType("IArguments").astParent.isCall
             )
               
             def indexArgument = indexAccessInAssignment.argument(2)
+
             def indexArgumentTainted = indexArgument.where(
-                _.reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
-              ) ++ indexArgument.where(
-                _.reachableBy(cpg.identifier.evalType("IArguments").astParent.isCall)
+              _.reachableBy(
+                cpg.method.fullName(methodNames).parameter.nameNot("this")
               )
+            ) ++ indexArgument.where(
+              _.reachableBy(
+                cpg.identifier.evalType("IArguments").astParent.isCall
+              )
+            )
             def lastArgumentTainted = identifierOrCall.reachableBy(
                 cpg.call(Operators.indexAccess)
               ).filterNot(
                 node => node.id == indexAccessInAssignment.id.l.head || (node.lineNumber.get == identifierOrCall.lineNumber.l.head && pp.argument(2).id == node.id)
               ).where(
-                _.argument(2).reachableBy(cpg.method.fullName(methodNames).parameter.nameNot("this"))
+                _.argument(2).reachableBy(
+                  cpg.method.fullName(methodNames).parameter.nameNot("this")
+                )
               ) ++ identifierOrCall.reachableBy(
                 cpg.call(Operators.indexAccess)
               ).filterNot(
