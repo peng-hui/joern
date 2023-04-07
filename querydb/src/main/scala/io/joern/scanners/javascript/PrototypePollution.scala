@@ -86,23 +86,29 @@ object PrototypePollution extends QueryBundle {
                 cpg.identifier.evalType("IArguments").astParent.isCall
               )
             )
-            def lastArgumentTainted = identifierOrCall.reachableBy(
-                cpg.call(Operators.indexAccess)
-              ).filterNot(
-                node => node.id == indexAccessInAssignment.id.l.head || (node.lineNumber.get == identifierOrCall.lineNumber.l.head && pp.argument(2).id == node.id)
-              ).where(
-                _.argument(2).reachableBy(
-                  cpg.method.fullName(methodNames).parameter.nameNot("this")
-                )
-              ) ++ identifierOrCall.reachableBy(
-                cpg.call(Operators.indexAccess)
-              ).filterNot(
-                node => node.id == indexAccessInAssignment.id.l.head || (node.lineNumber.get == identifierOrCall.lineNumber.l.head && pp.argument(2).id == node.id)
-              ).where(
-                _.argument(2).reachableBy(
-                  cpg.identifier.evalType("IArguments").astParent.isCall
-                )
+            
+            def lastArgument = identifierOrCall.reachableBy(
+              cpg.call(Operators.indexAccess)
+            ).filterNot(
+              node => node.id == indexAccessInAssignment.id.l.head || (node.lineNumber.get == identifierOrCall.lineNumber.l.head && pp.argument(2).id == node.id)
+            )
+            
+            if (lastArgument.argument(1).isIdentifier.nonEmpty) {
+              if (lastArgument.argument(1).evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
+                  break()
+              }
+            }
+
+            def lastArgumentTainted = lastArgument.where(
+              _.argument(2).reachableBy(
+                cpg.method.fullName(methodNames).parameter.nameNot("this")
               )
+            ) ++ lastArgument.where(
+              _.argument(2).reachableBy(
+                cpg.identifier.evalType("IArguments").astParent.isCall
+              )
+            )
+
             if (valReachable.size > 0 && indexAccessInAssignment.size > 0 && indexArgument.size > 0 && indexArgumentTainted.size > 0 && identifierOrCall.size > 0 && lastArgumentTainted.size > 0) {
               idList = idList :+ pp.id
             }
