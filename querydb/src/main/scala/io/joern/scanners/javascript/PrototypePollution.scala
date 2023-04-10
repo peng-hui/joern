@@ -26,6 +26,7 @@ object PrototypePollution extends QueryBundle {
         |""".stripMargin,
       score = 8,
       withStrRep({ cpg =>
+        
         def assignmentWithIndexAccess = cpg.call.where(
           _.name(Operators.assignment).argument(1).isCall.name(Operators.indexAccess)
         )
@@ -44,6 +45,7 @@ object PrototypePollution extends QueryBundle {
 
         for (pp <- possiblePollution) {
           breakable {
+            
             def indexAccessInAssignment = pp.astChildren.order(1).isCall.name(Operators.indexAccess)
 
             def identifierOrCall = indexAccessInAssignment.argument(1)
@@ -114,8 +116,88 @@ object PrototypePollution extends QueryBundle {
             }
           }
         }
+
         cpg.call.filter(node => idList.contains(node.id)).dedup.l
       }),
       tags = List(QueryTags.pp, QueryTags.default),
+      multiFileCodeExamples = MultiFileCodeExamples(
+        positive = List(
+          List(
+            CodeSnippet("""
+              |
+              |function pp(arg1, arg2, arg3){
+              |  var obj = {}
+              |  obj[arg1][arg2]=arg3
+              |}
+              |
+              |""".stripMargin,
+              "testPositive1.js"
+            )
+          ),
+          List(
+            CodeSnippet("""
+              |
+              |function test(arg){
+              |  var t = arg
+              |  return t
+              |}
+              |
+              |function pp(arg1, arg2, arg3) {
+              |  if (arg3) {
+              |    var o = {};
+              |    var o1 = o[test(arg1)];
+              |    o1[arg2] = arg3;
+              |  } else {
+              |    var op = {};
+              |    var o1 = op['foo1'];
+              |    o1['foo2'] = v;
+              |  }
+              |}
+              |
+              |""".stripMargin,
+              "testPositive2.js"
+            )
+          )
+        ),
+        negative = List(
+          List(
+            CodeSnippet("""
+              |
+              |function test(arg1, arg2, arg3){
+              |  var obj = {}
+              |  obj[arg][arg]=arg
+              |}
+              |
+              |""".stripMargin,
+              "testNegative1.js"
+            )
+          ),
+          List(
+            CodeSnippet("""
+              |
+              |function test(arg){
+              |  var t = arg
+              |  return t
+              |}
+              |
+              |function pp(arg1, arg2, arg3) {
+              |  if (arg3) {
+              |    var o = {10 : {}};
+              |    var arg = 10
+              |    var o1 = o[test(arg)];
+              |    o1[arg2] = arg3;
+              |  } else {
+              |    var op = {};
+              |    var o1 = op['foo1'];
+              |    o1['foo2'] = v;
+              |  }
+              |}
+              |
+              |""".stripMargin,
+              "testNegative2.js"
+            )
+          )
+        )
+      )
     )
 }
