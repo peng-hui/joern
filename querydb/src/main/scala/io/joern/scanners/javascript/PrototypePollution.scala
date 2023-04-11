@@ -16,13 +16,13 @@ object PrototypePollution extends QueryBundle {
   implicit val resolver: ICallResolver = NoResolve
 
   @q
-  def assignment(): Query =
+  def prototypePollution(): Query =
     Query.make(
       name = "prototype-pollution",
       author = "Tobiasfro",
       title = "This assignment may alter Object.prototype if a malicious '__proto__' string is injected",
       description = """
-        |Function can be used to change the prototype of an object, allowing for prototype pollution
+        |Function can be used to change the prototype of an object, allowing for prototype pollution.
         |""".stripMargin,
       score = 8,
       withStrRep({ cpg =>
