@@ -64,9 +64,9 @@ object PrototypePollution extends QueryBundle {
             */
             def identifierOrCall = indexAccessInAssignment.argument(1)
             if (identifierOrCall.isIdentifier.nonEmpty) {
-                if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
-                    break()
-                }
+              if (identifierOrCall.evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
+                break()
+              }
             }
             
             /*
@@ -81,10 +81,16 @@ object PrototypePollution extends QueryBundle {
               methodNames += nameList
             }
 
-            def recursiveMethodCalls = cpg.method.fullName(methodNames).ast.isReturn.ast.isCall.methodFullName.filterNot(_.matches(".*operator.*|.*unknownFullName.*")).dedup
-            for(recursiveMethodCall <- recursiveMethodCalls){
-                methodNames += "|"
-                methodNames += recursiveMethodCall
+            def callerMethods = cpg.method.fullName(methodNames).caller.fullName
+            def recursiveMethodCalls = cpg.method.fullName(methodNames).ast.isReturn.ast.isCall.methodFullName.filterNot(
+              _.matches(".*operator.*|.*unknownFullName.*")
+            ).dedup
+
+            def additionalMethods = (callerMethods ++ recursiveMethodCalls).dedup
+
+            for(additionalMethod <- additionalMethods){
+              methodNames += "|"
+              methodNames += additionalMethod
             }
 
             /*
@@ -133,7 +139,7 @@ object PrototypePollution extends QueryBundle {
             */
             if (lastArgument.argument(1).isIdentifier.nonEmpty) {
               if (lastArgument.argument(1).evalType("(ANY|.*(O|o)bject|.*\\{.*\\}.*)").size == 0){
-                  break()
+                break()
               }
             }
 
