@@ -619,6 +619,17 @@ class DataflowTests extends DataFlowCodeToCpgSuite {
     sink.reachableBy(src2).size shouldBe 1
   }
 
+  "Flow correctly from method parameter to argument of index access" in {
+    val cpg: Cpg = code("""
+      |function foo(x) {
+      |  obj[x]
+      |}""".stripMargin)
+
+    val sink = cpg.identifier("x").l
+    val src = cpg.method("foo").parameter.order(1).l
+    sink.reachableBy(src).size shouldBe 1
+  }
+
   "Flow correctly from parent scope to child function scope" in {
     val cpg: Cpg = code("""
         |function foo(u) {
