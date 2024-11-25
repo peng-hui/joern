@@ -27,7 +27,7 @@ object MemberAccess {
     (name == Operators.indirectComputedMemberAccess) ||
     (name == Operators.indirectMemberAccess) ||
     (name == Operators.computedMemberAccess) ||
-    (name == Operators.indirection) ||
+    //(name == Operators.indirection) ||
     (name == Operators.fieldAccess) ||
     (name == Operators.indirectFieldAccess) ||
     (name == Operators.indexAccess) ||

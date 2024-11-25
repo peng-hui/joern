@@ -7,12 +7,12 @@ import io.joern.console._
 import io.joern.macros.QueryMacros._
 import io.joern.dataflowengineoss.language._
 import io.joern.dataflowengineoss.queryengine.EngineContext
-import io.joern.dataflowengineoss.semanticsloader.Semantics
+import io.joern.dataflowengineoss.semanticsloader.FullNameSemantics
 import scala.util.control.Breaks._
 
 object PrototypePollution extends QueryBundle {
 
-  implicit val engineContext: EngineContext = EngineContext(Semantics.empty)
+  implicit val engineContext: EngineContext = EngineContext(FullNameSemantics.empty)
   implicit val resolver: ICallResolver = NoResolve
 
   @q
@@ -168,7 +168,7 @@ object PrototypePollution extends QueryBundle {
         /*
         * Mark all calls of the analyzed cpg as TP if that specific call has an id that can also be found in the idList
         */
-        cpg.call.filter(node => idList.contains(node.id)).dedup.l
+        cpg.call.filter(node => idList.contains(node.id)).dedup.l.iterator
       }),
       tags = List(QueryTags.pp, QueryTags.default),
       multiFileCodeExamples = MultiFileCodeExamples(
