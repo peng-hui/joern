@@ -49,7 +49,7 @@ import scala.util.control.Breaks._
         val lineNumber = v.lineNumber.getOrElse(-99)
         println(s"$fileName:$lineNumber")
         s"$fileName:$lineNumber"
-    }.dedup
+    }.distinct
 
 
     val outputFile = if (outputPath.isEmpty) {
