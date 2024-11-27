@@ -75,7 +75,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--outdir",
-        default="results",
         help=(
             "Output parent directory where the analysis results are saved. "
             "If not set, it would be currentdir/results."

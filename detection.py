@@ -3,30 +3,19 @@ import argparse, re
 SCAN_EXT=".scan"
 UPDATE_EXT=".update"
 
-def analyze_update(lib, libdir, outdir):
-    
-    command = f"./joern --script ./update.sc --param inputPath={libdir} --param outputPath={outdir}/{lib}{UPDATE_EXT}"
 
+def analyze(lib, libdir, outdir, scanner):
+    file_ext = SCAN_EXT if scanner == "scan" else UPDATE_EXT
+    
+    command1 = f"./joern-scan {libdir} > {outdir}/{lib}{file_ext}"
+    command2 = f"./joern --script ./update.sc --param inputPath={libdir} --param outputPath={outdir}/{lib}{file_ext}"
     try:
-        print(command)
+        command = command1 if scanner == "scan" else command2
+        #print(command)
         #print("%s:%s"%(lib, libdir))
         subprocess.run(command, shell=True, check=True, stdout=subprocess.DEVNULL)
     except subprocess.CalledProcessError as e:
         print("ERROR %s: %d" % (lib, e.returncode))
-
-
-def analyze_scan(lib, libdir, outdir):
-    
-    command = f"./joern-scan {libdir} > {outdir}/{lib}{SCAN_EXT}"
-
-    try:
-        print(command)
-        #print("%s:%s"%(lib, libdir))
-        subprocess.run(command, shell=True, check=True, stdout=subprocess.DEVNULL)
-    except subprocess.CalledProcessError as e:
-        print("ERROR %s: %d" % (lib, e.returncode))
-
-
 
 def main():
     """Main function. Collect command line arguments and begin"""
@@ -76,14 +65,13 @@ def main():
     if args.library:
         lib, libdir = args.library.strip().split(":")
 
-
-        analyze_update(lib, libdir, args.outdir)
+        analyze(lib, libdir, args.outdir, args.scanner)
 
     elif args.batch and os.path.exists(args.batch):
         with open(args.batch, "r") as fp:
             libs = [i.strip().split(":") for i in fp.readlines()]
         for lib in libs:
-            analyze_update(lib[0], lib[1], args.outdir)
+            analyze(lib[0], lib[1], args.outdir, args.scanner)
     else:
         print("need to either specify a library (--library) or a dataset file in batch (--batch) ")
 
