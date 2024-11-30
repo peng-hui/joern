@@ -1,6 +1,5 @@
-asciitable:/Users/phli/llm4pa/joern/benchmark/asciitable_lib/node_modules/asciitable.js
-node_extend:/Users/phli/llm4pa/joern/benchmark/node_extend_lib/node_modules/node.extend
 arr_flatten_unflatten:/Users/phli/llm4pa/joern/benchmark/arr_flatten_unflatten_lib/node_modules/arr-flatten-unflatten
+asciitable:/Users/phli/llm4pa/joern/benchmark/asciitable_lib/node_modules/asciitable.js
 assign_deep:/Users/phli/llm4pa/joern/benchmark/assign_deep_lib/node_modules/assign-deep
 class_transformer:/Users/phli/llm4pa/joern/benchmark/class_transformer_lib/node_modules/class-transformer
 controlled_merge:/Users/phli/llm4pa/joern/benchmark/controlled_merge_lib/node_modules/controlled-merge
@@ -26,6 +25,7 @@ mout:/Users/phli/llm4pa/joern/benchmark/mout_lib/node_modules/mout
 mpath:/Users/phli/llm4pa/joern/benchmark/mpath_lib/node_modules/mpath
 nconf_toml:/Users/phli/llm4pa/joern/benchmark/nconf_toml_lib/node_modules/nconf-toml
 nested_property:/Users/phli/llm4pa/joern/benchmark/nested_property_lib/node_modules/nested-property
+node_extend:/Users/phli/llm4pa/joern/benchmark/node_extend_lib/node_modules/node.extend
 predefine:/Users/phli/llm4pa/joern/benchmark/predefine_lib/node_modules/predefine
 promisehelpers:/Users/phli/llm4pa/joern/benchmark/promisehelpers_lib/node_modules/promisehelpers
 properties-reader:/Users/phli/llm4pa/joern/benchmark/properties-reader_lib/node_modules/properties-reader
