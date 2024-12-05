@@ -3,7 +3,7 @@ package io.joern.dataflowengineoss.passes.reachingdef
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{EdgeTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
-import io.shiftleft.semanticcpg.utils.MemberAccess.{isFieldAccess, isGenericMemberAccessName}
+import io.shiftleft.semanticcpg.utils.MemberAccess.{isFieldAccess, isFieldAccess1, isGenericMemberAccessName}
 import org.slf4j.{Logger, LoggerFactory}
 
 import scala.collection.{Set, mutable}
@@ -189,7 +189,7 @@ class ReachingDefTransferFunction(flowGraph: ReachingDefFlowGraph)
     // taint unharmed.
 
     val defsForCalls = method.call
-      .filterNot(x => isFieldAccess(x.name))
+      .filterNot(x => isFieldAccess1(x.name))
       .l
       .map { call =>
         call -> {
