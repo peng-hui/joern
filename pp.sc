@@ -8,8 +8,8 @@ import io.joern.dataflowengineoss.queryengine.EngineContext
 import io.joern.dataflowengineoss.semanticsloader.Semantics
 import scala.util.control.Breaks._
 
-@main def main(inputPath: String="/Users/phli/llm4pa/joern/benchmark/changeset_lib/node_modules/changeset/cpg.bin", outputPath: String = "") = {
-    importCpg(inputPath)
+@main def main(inputPath: String, outputPath: String = "") = {
+    importCode(inputPath)
 
     /*
     * Finds all assignment calls where the left hand side is an index access.
