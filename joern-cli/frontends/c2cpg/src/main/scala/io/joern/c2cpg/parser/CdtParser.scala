@@ -4,17 +4,21 @@ import better.files.File
 import io.joern.c2cpg.Config
 import io.joern.c2cpg.parser.JSONCompilationDatabaseParser.CommandObject
 import io.shiftleft.utils.IOUtils
+import org.eclipse.cdt.core.dom.ast.IASTPreprocessorStatement
+import org.eclipse.cdt.core.dom.ast.IASTTranslationUnit
 import org.eclipse.cdt.core.dom.ast.gnu.c.GCCLanguage
 import org.eclipse.cdt.core.dom.ast.gnu.cpp.GPPLanguage
-import org.eclipse.cdt.core.dom.ast.{IASTPreprocessorStatement, IASTTranslationUnit}
 import org.eclipse.cdt.core.model.ILanguage
-import org.eclipse.cdt.core.parser.{DefaultLogService, ScannerInfo}
+import org.eclipse.cdt.core.parser.DefaultLogService
 import org.eclipse.cdt.core.parser.FileContent
+import org.eclipse.cdt.core.parser.ScannerInfo
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPVisitor
 import org.eclipse.cdt.internal.core.parser.scanner.InternalFileContent
 import org.slf4j.LoggerFactory
 
-import java.nio.file.{NoSuchFileException, Path}
+import java.nio.file.NoSuchFileException
+import java.nio.file.Path
+import scala.collection.mutable
 import scala.jdk.CollectionConverters.*
 import scala.util.Failure
 import scala.util.Success
@@ -31,22 +35,18 @@ object CdtParser {
     failure: Option[Throwable] = None
   )
 
-  def loadLinesAsFileContent(path: Path, lines: Array[Char]): InternalFileContent = {
-    FileContent.create(path.toString, true, lines).asInstanceOf[InternalFileContent]
-  }
-
-  def readFileAsFileContent(path: Path): InternalFileContent = {
+  private def readFileAsFileContent(path: Path): InternalFileContent = {
     val lines = IOUtils.readLinesInFile(path).mkString("\n").toArray
-    loadLinesAsFileContent(path, lines)
+    FileContent.create(path.toString, true, lines).asInstanceOf[InternalFileContent]
   }
 
 }
 
-class CdtParser(config: Config, compilationDatabase: List[CommandObject])
+class CdtParser(config: Config, compilationDatabase: mutable.LinkedHashSet[CommandObject])
     extends ParseProblemsLogger
     with PreprocessorStatementsLogger {
 
-  import io.joern.c2cpg.parser.CdtParser._
+  import io.joern.c2cpg.parser.CdtParser.*
 
   private val headerFileFinder = new HeaderFileFinder(config.inputPath)
   private val parserConfig     = ParserConfig.fromConfig(config, compilationDatabase)
@@ -84,7 +84,7 @@ class CdtParser(config: Config, compilationDatabase: List[CommandObject])
       if (FileDefaults.isCPPFile(file.toString)) parserConfig.systemIncludePathsCPP
       else parserConfig.systemIncludePathsC
     val fileSpecificDefines  = parserConfig.definedSymbolsPerFile.getOrElse(file.toString, Map.empty)
-    val fileSpecificIncludes = parserConfig.includesPerFile.getOrElse(file.toString, List.empty)
+    val fileSpecificIncludes = parserConfig.includesPerFile.getOrElse(file.toString, mutable.LinkedHashSet.empty)
     new ScannerInfo(
       (definedSymbols ++ fileSpecificDefines).asJava,
       fileSpecificIncludes.toArray ++ (includePaths ++ additionalIncludes).map(_.toString).toArray

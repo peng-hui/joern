@@ -1,6 +1,7 @@
 package io.joern.rubysrc2cpg.astcreation
 
 import io.joern.rubysrc2cpg.astcreation.RubyIntermediateAst.{
+  ArrayPattern,
   BinaryExpression,
   BreakExpression,
   CaseExpression,
@@ -9,12 +10,15 @@ import io.joern.rubysrc2cpg.astcreation.RubyIntermediateAst.{
   ElseClause,
   ForExpression,
   IfExpression,
+  InClause,
+  MatchVariable,
   MemberCall,
   NextExpression,
   OperatorAssignment,
   RescueExpression,
   ReturnExpression,
   RubyExpression,
+  SimpleCall,
   SimpleIdentifier,
   SingleAssignment,
   SplattingRubyNode,
@@ -28,6 +32,7 @@ import io.joern.rubysrc2cpg.astcreation.RubyIntermediateAst.{
 }
 import io.joern.rubysrc2cpg.parser.RubyJsonHelpers
 import io.joern.rubysrc2cpg.passes.Defines
+import io.joern.rubysrc2cpg.passes.Defines.RubyOperators
 import io.joern.x2cpg.{Ast, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
 import io.shiftleft.codepropertygraph.generated.nodes.{
@@ -243,49 +248,90 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
     // TODO: Clean up the below
     def goCase(expr: Option[SimpleIdentifier]): List[RubyExpression] = {
       val elseThenClause: Option[RubyExpression] = node.elseClause.map(_.asInstanceOf[ElseClause].thenClause)
-      val whenClauses                            = node.whenClauses.map(_.asInstanceOf[WhenClause])
-      val ifElseChain = whenClauses.foldRight[Option[RubyExpression]](elseThenClause) {
-        (whenClause: WhenClause, restClause: Option[RubyExpression]) =>
-          // We translate multiple match expressions into an or expression.
-          //
-          // A single match expression is compared using `.===` to the case target expression if it is present
-          // otherwise it is treated as a conditional.
-          //
-          // There may be a splat as the last match expression,
-          // `case y when *x then c end` or
-          // `case when *x then c end`
-          // which is translated to `x.include? y` and `x.any?` conditions respectively
+      val whenClauses                            = node.matchClauses.collect { case x: WhenClause => x }
+      val inClauses                              = node.matchClauses.collect { case x: InClause => x }
 
-          val conditions = whenClause.matchExpressions.map { mExpr =>
-            expr.map(e => BinaryExpression(mExpr, "===", e)(mExpr.span)).getOrElse(mExpr)
-          } ++ whenClause.matchSplatExpression.iterator.flatMap {
-            case splat @ SplattingRubyNode(exprList) =>
-              expr
-                .map { e =>
-                  List(MemberCall(exprList, ".", "include?", List(e))(splat.span))
+      val ifElseChain = if (whenClauses.nonEmpty) {
+        whenClauses.foldRight[Option[RubyExpression]](elseThenClause) {
+          (whenClause: WhenClause, restClause: Option[RubyExpression]) =>
+            // We translate multiple match expressions into an or expression.
+            //
+            // A single match expression is compared using `.===` to the case target expression if it is present
+            // otherwise it is treated as a conditional.
+            //
+            // There may be a splat as the last match expression,
+            // `case y when *x then c end` or
+            // `case when *x then c end`
+            // which is translated to `x.include? y` and `x.any?` conditions respectively
+
+            val conditions = whenClause.matchExpressions.map { mExpr =>
+              expr.map(e => BinaryExpression(mExpr, "===", e)(mExpr.span)).getOrElse(mExpr)
+            } ++ whenClause.matchSplatExpression.iterator.flatMap {
+              case splat @ SplattingRubyNode(exprList) =>
+                expr
+                  .map { e =>
+                    List(MemberCall(exprList, ".", "include?", List(e))(splat.span))
+                  }
+                  .getOrElse {
+                    List(MemberCall(exprList, ".", "any?", List())(splat.span))
+                  }
+              case e =>
+                logger.warn(s"Unrecognised RubyNode (${e.getClass}) in case match splat expression")
+                List(Unknown()(e.span))
+            }
+            // There is always at least one match expression or a splat
+            // will become an unknown in condition at the end
+            val condition = conditions.init.foldRight(conditions.last) { (cond, condAcc) =>
+              BinaryExpression(cond, "||", condAcc)(whenClause.span)
+            }
+            val conditional = IfExpression(
+              condition,
+              whenClause.thenClause.asStatementList,
+              List(),
+              restClause.map { els => ElseClause(els.asStatementList)(els.span) }
+            )(node.span)
+            Some(conditional)
+        }
+      } else {
+        inClauses.foldRight[Option[RubyExpression]](elseThenClause) {
+          (inClause: InClause, restClause: Option[RubyExpression]) =>
+            val (condition, body) = inClause.pattern match {
+              case x: ArrayPattern =>
+                val condition = expr.map(e => BinaryExpression(x, "===", e)(x.span)).getOrElse(inClause.pattern)
+                val body      = inClause.body
+
+                val variables = x.children.collect { case x: MatchVariable =>
+                  x
                 }
-                .getOrElse {
-                  List(MemberCall(exprList, ".", "any?", List())(splat.span))
+
+                val conditionBody = if (variables.nonEmpty) {
+                  StatementList(variables.map { x =>
+                    val lhs = SimpleIdentifier()(x.span)
+                    SingleAssignment(lhs, "=", x)(
+                      inClause.span
+                        .spanStart(s"${lhs.span.text} = ${RubyOperators.arrayPatternMatch}(${lhs.span.text})")
+                    )
+                  } :+ body)(body.span)
+                } else {
+                  body
                 }
-            case e =>
-              logger.warn(s"Unrecognised RubyNode (${e.getClass}) in case match splat expression")
-              List(Unknown()(e.span))
-          }
-          // There is always at least one match expression or a splat
-          // will become an unknown in condition at the end
-          val condition = conditions.init.foldRight(conditions.last) { (cond, condAcc) =>
-            BinaryExpression(cond, "||", condAcc)(whenClause.span)
-          }
-          val conditional = IfExpression(
-            condition,
-            whenClause.thenClause.asStatementList,
-            List(),
-            restClause.map { els => ElseClause(els.asStatementList)(els.span) }
-          )(node.span)
-          Some(conditional)
+
+                (condition, conditionBody)
+              case x => (x, inClause.body)
+            }
+
+            val conditional = IfExpression(
+              condition,
+              body,
+              List.empty,
+              restClause.map { els => ElseClause(els.asStatementList)(els.span) }
+            )(node.span)
+            Some(conditional)
+        }
       }
       ifElseChain.iterator.toList
     }
+
     def generatedNode: StatementList = node.expression
       .map { e =>
         val tmp = SimpleIdentifier(None)(e.span.spanStart(this.tmpGen.fresh))
