@@ -9,6 +9,7 @@ object Projects {
   lazy val dataflowengineoss = project.in(file("dataflowengineoss"))
   lazy val macros            = project.in(file("macros"))
   lazy val semanticcpg       = project.in(file("semanticcpg"))
+  lazy val domainsl               = project.in(file("domainsl"))
 
   lazy val c2cpg         = project.in(frontendsRoot / "c2cpg")
   lazy val ghidra2cpg    = project.in(frontendsRoot / "ghidra2cpg")
@@ -23,5 +24,6 @@ object Projects {
   lazy val rubysrc2cpg   = project.in(frontendsRoot / "rubysrc2cpg")
   lazy val gosrc2cpg     = project.in(frontendsRoot / "gosrc2cpg")
   lazy val csharpsrc2cpg = project.in(frontendsRoot / "csharpsrc2cpg")
+
 
 }

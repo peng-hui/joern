@@ -6,6 +6,7 @@ val cpgVersion = "1.7.13"
 
 lazy val joerncli          = Projects.joerncli
 lazy val querydb           = Projects.querydb
+lazy val domainsl          = Projects.domainsl
 lazy val console           = Projects.console
 lazy val dataflowengineoss = Projects.dataflowengineoss
 lazy val macros            = Projects.macros
@@ -56,6 +57,8 @@ createDistribution := {
 
   IO.copyFile(zip, distributionFile)
   val querydbDistribution = (querydb / createDistribution).value
+
+  val domainslDistribution = (domainsl / createDistribution).value
 
   println(s"created distribution - resulting files: $distributionFile")
   distributionFile
