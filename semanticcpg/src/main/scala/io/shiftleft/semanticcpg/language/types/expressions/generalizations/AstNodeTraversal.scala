@@ -46,14 +46,18 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal 
     traversal.flatMap(_.astChildren).sortBy(_.order).iterator
 
 
-  /** DSL operations
+
+
+
+  /** DSL operations, this is added to all possible nodetypes traversals.
+      TODO: investiate the nodemethods.
     */
 
   // find all assgnments
   def DslAssignments: Iterator[AstNode] = traversal.flatMap(_.assignment).iterator
 
   // find all index access, dict[idx]
-  def DslIndexAccess: Iterator[AstNode] = traversal.isCall.name(Operators.indexAccess).iterator
+  def DslArrayAccess: Iterator[AstNode] = traversal.isCall.name(Operators.indexAccess).iterator
 
   // for method or methodRef?
   def DslParameter(implicit cpg: Cpg): Iterator[AstNode] =  {
@@ -73,6 +77,25 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal 
       case _ =>  List.empty
     }.distinct.iterator
   }
+
+
+  // find idx of identifier[idx]
+  def DslIndex: Iterator[AstNode] = traversal.isCall.arrayAccess.offset
+
+
+  // find dict of identifier[idx]
+  def DslArray: Iterator[AstNode] = traversal.isCall.arrayAccess.array
+
+
+  def DslGetArrayAccessWithArrayName(arrayName: String): Iterator[AstNode] = {
+    traversal.arrayAccess.where(_.array.isIdentifier.name(arrayName))
+  }
+
+  def DslGetFunctionCallWithFuncName(funcName: String): Iterator[AstNode] = {
+    traversal.call.name(funcName)
+  }
+
+
 
 
 
