@@ -1,7 +1,9 @@
 package io.shiftleft.semanticcpg.language.types.expressions.generalizations
 
 import io.shiftleft.codepropertygraph.generated.help.{Doc, Traversal}
+import io.shiftleft.codepropertygraph.generated.Cpg
 import io.shiftleft.codepropertygraph.generated.nodes.*
+import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.codepropertygraph.generated.help.Doc
 
@@ -42,6 +44,42 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal 
     */
   def astChildren: Iterator[AstNode] =
     traversal.flatMap(_.astChildren).sortBy(_.order).iterator
+
+
+  /** DSL operations
+    */
+
+  // find all assgnments
+  def DslAssignments: Iterator[AstNode] = traversal.flatMap(_.assignment).iterator
+
+  // find all index access, dict[idx]
+  def DslIndexAccess: Iterator[AstNode] = traversal.isCall.name(Operators.indexAccess).iterator
+
+  // for method or methodRef?
+  def DslParameter(implicit cpg: Cpg): Iterator[AstNode] =  {
+    traversal.flatMap {
+      case id: Identifier => 
+        cpg.method.where(_.nameExact(id.name)).parameter
+      
+      case ref: MethodRef => 
+       cpg.method.where(_.fullNameExact(ref.methodFullName)).parameter
+
+      case call: Call => 
+        call.method.parameter
+
+      case method: Method => 
+        method.parameter
+
+      case _ =>  List.empty
+    }.distinct.iterator
+  }
+
+
+
+
+
+
+
 
   /** Parent AST node
     */
