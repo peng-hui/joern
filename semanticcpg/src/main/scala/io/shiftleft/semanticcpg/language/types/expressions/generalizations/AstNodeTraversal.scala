@@ -6,6 +6,11 @@ import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.Operators
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.codepropertygraph.generated.help.Doc
+import io.shiftleft.semanticcpg.language.operatorextension.OpNodes.Assignment
+import io.shiftleft.semanticcpg.language.ICallResolver
+import io.shiftleft.semanticcpg.language.types.expressions.CallTraversal
+
+// import io.joern.dataflowengineoss.language.Path
 
 @Traversal(elementType = classOf[AstNode])
 class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal {
@@ -48,7 +53,6 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal 
 
 
 
-
   /** DSL operations, this is added to all possible nodetypes traversals.
       TODO: investiate the nodemethods.
     */
@@ -86,16 +90,38 @@ class AstNodeTraversal[A <: AstNode](val traversal: Iterator[A]) extends AnyVal 
   // find dict of identifier[idx]
   def DslArray: Iterator[AstNode] = traversal.isCall.arrayAccess.array
 
-
+  // find arrayaccess with array name, e.g., _GET.
   def DslGetArrayAccessWithArrayName(arrayName: String): Iterator[AstNode] = {
     traversal.arrayAccess.where(_.array.isIdentifier.name(arrayName))
   }
 
+
+  // find function with its name
   def DslGetFunctionCallWithFuncName(funcName: String): Iterator[AstNode] = {
-    traversal.call.name(funcName)
+    traversal.isCall.name(funcName)
   }
 
 
+  // ** phli ** 
+  def referencedMethod(implicit cpg: Cpg, callResolver: ICallResolver): Iterator[Method] = {
+    traversal.flatMap {
+      case ref: MethodRef => 
+       ref.referencedMethod
+
+      // case call: Call => 
+      //   call.callee
+
+      case method: Method => 
+        method
+
+      case block: Block =>
+          block.astChildren.isCall.name(Operators.assignment).argument(2).collect { case id: Identifier => id }.flatMap(id => cpg.method.where(_.nameExact(id.name))).iterator
+      case id: Identifier =>
+        cpg.method.where(_.nameExact(id.name)).iterator
+
+      case _ =>  List.empty
+    }.distinct.iterator
+  }
 
 
 
