@@ -3,6 +3,7 @@ package io.joern.c2cpg.passes
 import io.joern.c2cpg.C2Cpg.DefaultIgnoredFolders
 import io.joern.c2cpg.Config
 import io.joern.c2cpg.parser.{CdtParser, FileDefaults}
+import io.joern.c2cpg.parser.HeaderFileFinder
 import io.joern.c2cpg.parser.JSONCompilationDatabaseParser
 import io.joern.c2cpg.parser.JSONCompilationDatabaseParser.CommandObject
 import io.joern.x2cpg.SourceFiles
@@ -25,13 +26,14 @@ class PreprocessorPass(config: Config) {
   private val compilationDatabase: mutable.LinkedHashSet[CommandObject] =
     config.compilationDatabase.map(JSONCompilationDatabaseParser.parse).getOrElse(mutable.LinkedHashSet.empty)
 
-  private val parser = new CdtParser(config, compilationDatabase)
+  private val headerFileFinder = new HeaderFileFinder(config)
+  private val parser           = new CdtParser(config, headerFileFinder, compilationDatabase)
 
   private def sourceFilesFromDirectory(): ParIterable[String] = {
     SourceFiles
       .determine(
         config.inputPath,
-        FileDefaults.SOURCE_FILE_EXTENSIONS,
+        FileDefaults.SourceFileExtensions,
         ignoredDefaultRegex = Option(DefaultIgnoredFolders),
         ignoredFilesRegex = Option(config.ignoredFilesRegex),
         ignoredFilesPath = Option(config.ignoredFiles)

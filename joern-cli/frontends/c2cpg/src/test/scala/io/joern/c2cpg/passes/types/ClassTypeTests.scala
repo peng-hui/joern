@@ -5,7 +5,7 @@ import io.joern.c2cpg.testfixtures.C2CpgSuite
 import io.shiftleft.semanticcpg.language.*
 import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 
-class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
+class ClassTypeTests extends C2CpgSuite(FileDefaults.CppExt) {
 
   "handling C++ classes (code example 1)" should {
     val cpg = code("""
@@ -64,22 +64,22 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
 
   "handling C++ classes (code example 2)" should {
     val cpg = code("""
-      |class foo : bar {
+      |class Foo : Bar {
       |  char x;
       |  int y;
-      |  int method () {}
+      |  int method() {}
       |};
       |typedef int mytype;""".stripMargin)
 
-    "should contain a type decl for `foo` with correct fields" in {
-      val List(x) = cpg.typeDecl("foo").l
-      x.fullName shouldBe "foo"
+    "should contain a type decl for `Foo` with correct fields" in {
+      val List(x) = cpg.typeDecl("Foo").l
+      x.fullName shouldBe "Foo"
       x.isExternal shouldBe false
-      x.inheritsFromTypeFullName shouldBe List("bar")
+      x.inheritsFromTypeFullName shouldBe List("Bar")
       x.aliasTypeFullName shouldBe None
       x.order shouldBe 1
       x.filename shouldBe "Test0.cpp"
-      x.filename.endsWith(FileDefaults.CPP_EXT) shouldBe true
+      x.filename.endsWith(FileDefaults.CppExt) shouldBe true
     }
 
     "should contain type decl for alias `mytype` of `int`" in {
@@ -91,7 +91,7 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
       x.code shouldBe "typedef int mytype;"
       x.order shouldBe 2
       x.filename shouldBe "Test0.cpp"
-      x.filename.endsWith(FileDefaults.CPP_EXT) shouldBe true
+      x.filename.endsWith(FileDefaults.CppExt) shouldBe true
     }
 
     "should contain type decl for external type `int`" in {
@@ -105,15 +105,15 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
     }
 
     "should find exactly 1 internal type" in {
-      cpg.typeDecl.nameNot(NamespaceTraversal.globalNamespaceName).internal.name.toSetMutable shouldBe Set("foo")
+      cpg.typeDecl.nameNot(NamespaceTraversal.globalNamespaceName).internal.name.toSetMutable shouldBe Set("Foo")
     }
 
-    "should find five external types (`bar`, `char`, `int`, `void`, `ANY`)" in {
-      cpg.typeDecl.external.name.toSetMutable shouldBe Set("bar", "char", "int", "void", "ANY")
+    "should find external type decls" in {
+      cpg.typeDecl.external.name.sorted.toSetMutable shouldBe Set("ANY", "Bar", "Foo*", "char", "int", "void")
     }
 
-    "should find two members for `foo`: `x` and `y`" in {
-      cpg.typeDecl.name("foo").member.name.toSetMutable shouldBe Set("x", "y")
+    "should find two members for `Foo`: `x` and `y`" in {
+      cpg.typeDecl.name("Foo").member.name.toSetMutable shouldBe Set("x", "y")
     }
 
     "should allow traversing from `int` to its alias `mytype`" in {
@@ -122,11 +122,11 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
     }
 
     "should find one method in type `foo`" in {
-      cpg.typeDecl.name("foo").method.name.toSetMutable shouldBe Set("method")
+      cpg.typeDecl.name("Foo").method.name.toSetMutable shouldBe Set("method")
     }
 
     "should allow traversing from type to enclosing file" in {
-      cpg.typeDecl.file.filter(_.name.endsWith(FileDefaults.CPP_EXT)).l should not be empty
+      cpg.typeDecl.file.filter(_.name.endsWith(FileDefaults.CppExt)).l should not be empty
     }
   }
 
@@ -175,7 +175,7 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
       constructor.signature shouldBe "Bar.Foo(std.string&,Bar.SomeClass&)"
       val List(thisP, p1, p2) = constructor.parameter.l
       thisP.name shouldBe "this"
-      thisP.typeFullName shouldBe "FooT"
+      thisP.typeFullName shouldBe "FooT*"
       thisP.index shouldBe 0
       p1.typ.fullName shouldBe "std.string&"
       p1.index shouldBe 1
@@ -201,13 +201,13 @@ class ClassTypeTests extends C2CpgSuite(FileDefaults.CPP_EXT) {
       del.name shouldBe "delete"
       del.fullName shouldBe "Foo.delete:void(void*)"
       eq.name shouldBe "=="
-      eq.fullName shouldBe "Foo.==:bool(Foo &,Foo &)"
+      eq.fullName shouldBe "Foo.==:bool(Foo&,Foo&)"
       plus.name shouldBe "+"
-      plus.fullName shouldBe "Foo.+:Foo &(Foo &,Foo &)"
+      plus.fullName shouldBe "Foo.+:Foo&(Foo&,Foo&)"
       apply.name shouldBe "()"
-      apply.fullName shouldBe "Foo.():Foo &(Foo &)"
+      apply.fullName shouldBe "Foo.():Foo&(Foo&)"
       idx.name shouldBe "[]"
-      idx.fullName shouldBe "Foo.[]:Foo &(int)"
+      idx.fullName shouldBe "Foo.[]:Foo&(int)"
     }
 
     "generate correct fullnames in classes with conversions" in {

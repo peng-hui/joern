@@ -15,6 +15,7 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.ICPPInternalBinding
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTIdExpression
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPField
+import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.CPPVisitor
 import org.eclipse.cdt.internal.core.dom.parser.cpp.semantics.EvalMemberAccess
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 
@@ -32,7 +33,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
       val thisIdentifier = identifierNode(lit, "this", "this", tpe)
       scope.lookupVariable("this") match {
         case Some((variable, _)) => Ast(thisIdentifier).withRefEdge(thisIdentifier, variable)
-        case None                => Ast(identifierNode(lit, codeString, codeString, tpe))
+        case _                   => Ast(identifierNode(lit, codeString, codeString, tpe))
       }
     } else {
       Ast(literalNode(lit, codeString, tpe))
@@ -61,17 +62,16 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
   private def maybeMethodRefForIdentifier(ident: IASTNode): Option[NewMethodRef] = {
     ident match {
       case id: IASTIdExpression if id.getName != null =>
-        id.getName.resolveBinding()
-        val (mayBeFullName, mayBeTypeFullName) = id.getName.getBinding match {
-          case binding: ICInternalBinding if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
+        val (mayBeFullName, mayBeTypeFullName) = safeGetBinding(id) match {
+          case Some(binding: ICInternalBinding) if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
             namesForBinding(binding)
-          case binding: ICInternalBinding
+          case Some(binding: ICInternalBinding)
               if binding.getDeclarations != null &&
                 binding.getDeclarations.exists(_.isInstanceOf[IASTFunctionDeclarator]) =>
             namesForBinding(binding)
-          case binding: ICPPInternalBinding if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
+          case Some(binding: ICPPInternalBinding) if binding.getDefinition.isInstanceOf[IASTFunctionDeclarator] =>
             namesForBinding(binding)
-          case binding: ICPPInternalBinding
+          case Some(binding: ICPPInternalBinding)
               if binding.getDeclarations != null &&
                 binding.getDeclarations.exists(_.isInstanceOf[CPPASTFunctionDeclarator]) =>
             namesForBinding(binding)
@@ -85,8 +85,12 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
     }
   }
 
-  private def isInCurrentScope(owner: String): Boolean = {
-    methodAstParentStack.collectFirst {
+  private def isInCurrentScope(ident: CPPASTIdExpression, owner: String): Boolean = {
+    val isInMethodScope =
+      Try(CPPVisitor.getContainingScope(ident).getScopeName.toString).toOption.exists(s =>
+        s.startsWith(s"$owner::") || s.contains(s"::$owner::")
+      )
+    isInMethodScope || methodAstParentStack.collectFirst {
       case typeDecl: NewTypeDecl if typeDecl.fullName == owner    => typeDecl
       case method: NewMethod if method.fullName.startsWith(owner) => method
     }.nonEmpty
@@ -97,7 +101,7 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
       case id: IASTIdExpression => ASTStringUtil.getSimpleName(id.getName)
       case id: IASTName =>
         val name = ASTStringUtil.getSimpleName(id)
-        if (name.isEmpty) Try(id.resolveBinding().getName).getOrElse(uniqueName("name", "", "")._1)
+        if (name.isEmpty) safeGetBinding(id).map(_.getName).getOrElse(uniqueName("name", "", "")._1)
         else name
       case _ => code(ident)
     }
@@ -105,21 +109,23 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
 
   private def syntheticThisAccess(ident: CPPASTIdExpression, identifierName: String): String | Ast = {
     val tpe = ident.getName.getBinding match {
-      case f: CPPField => cleanType(f.getType.toString)
+      case f: CPPField => safeGetType(f.getType)
       case _           => typeFor(ident)
     }
     Try(ident.getEvaluation).toOption match {
       case Some(e: EvalMemberAccess) =>
-        val tpe       = registerType(typeFor(ident))
-        val ownerType = registerType(cleanType(e.getOwnerType.toString))
-        if (isInCurrentScope(ownerType)) {
+        val ownerTypeRaw = cleanType(safeGetType(e.getOwnerType))
+        val deref        = if (e.isPointerDeref) "*" else ""
+        val ownerType    = registerType(s"$ownerTypeRaw$deref")
+        if (isInCurrentScope(ident, ownerTypeRaw)) {
           scope.lookupVariable("this") match {
             case Some((variable, _)) =>
               val op             = Operators.indirectFieldAccess
               val code           = s"this->$identifierName"
-              val thisIdentifier = identifierNode(ident, "this", "this", tpe)
+              val thisIdentifier = identifierNode(ident, "this", "this", ownerType)
               val member         = fieldIdentifierNode(ident, identifierName, identifierName)
-              val ma = callNode(ident, code, op, op, DispatchTypes.STATIC_DISPATCH, None, Some(X2CpgDefines.Any))
+              val ma =
+                callNode(ident, code, op, op, DispatchTypes.STATIC_DISPATCH, None, Some(registerType(cleanType(tpe))))
               callAst(ma, Seq(Ast(thisIdentifier).withRefEdge(thisIdentifier, variable), Ast(member)))
             case None => tpe
           }
@@ -159,9 +165,8 @@ trait AstForPrimitivesCreator(implicit withSchemaValidation: ValidationMode) { t
           case identifierTypeName: String =>
             val node = identifierNode(ident, identifierName, code(ident), registerType(cleanType(identifierTypeName)))
             scope.lookupVariable(identifierName) match {
-              case Some((variable, _)) =>
-                Ast(node).withRefEdge(node, variable)
-              case None => Ast(node)
+              case Some((variable, _)) => Ast(node).withRefEdge(node, variable)
+              case _                   => Ast(node)
             }
           case ast: Ast => ast
         }

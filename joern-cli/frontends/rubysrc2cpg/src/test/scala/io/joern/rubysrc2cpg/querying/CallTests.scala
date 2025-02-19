@@ -71,7 +71,7 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
     val List(atan2) = cpg.call.name("atan2").l
     atan2.lineNumber shouldBe Some(3)
     atan2.code shouldBe "Math.atan2(1, 1)"
-    atan2.methodFullName shouldBe s"${GlobalTypes.builtinPrefix}.Math.atan2"
+    atan2.methodFullName shouldBe s"${RubyDefines.prefixAsCoreType("Math")}.atan2"
     atan2.dispatchType shouldBe DispatchTypes.DYNAMIC_DISPATCH
 
     val List(mathRec: Call) = atan2.receiver.l: @unchecked
@@ -79,7 +79,7 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
     mathRec.typeFullName shouldBe Defines.Any
     mathRec.code shouldBe s"Math.atan2"
 
-    mathRec.argument(1).asInstanceOf[TypeRef].typeFullName shouldBe s"${GlobalTypes.builtinPrefix}.Math"
+    mathRec.argument(1).asInstanceOf[TypeRef].typeFullName shouldBe RubyDefines.prefixAsCoreType("Math")
     mathRec.argument(2).asInstanceOf[FieldIdentifier].canonicalName shouldBe "atan2"
   }
 
@@ -357,7 +357,7 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
   "a call with a quoted regex literal should have a literal receiver" in {
     val cpg          = code("%r{^/}.freeze()")
     val regexLiteral = cpg.call.nameExact("freeze").receiver.fieldAccess.argument(1).head.asInstanceOf[Literal]
-    regexLiteral.typeFullName shouldBe s"$kernelPrefix.Regexp"
+    regexLiteral.typeFullName shouldBe RubyDefines.prefixAsCoreType(RubyDefines.Regexp)
     regexLiteral.code shouldBe "%r{^/}"
   }
 
@@ -436,19 +436,20 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
     inside(cpg.call.name("foo").l) {
       case fooCall :: Nil =>
         inside(fooCall.argument.l) {
-          case _ :: (arrayArg: Call) :: Nil =>
+          case _ :: (arrayArg: Block) :: Nil =>
             arrayArg.code shouldBe "[:b, :c => 1]"
-            arrayArg.methodFullName shouldBe Operators.arrayInitializer
 
-            inside(arrayArg.argument.l) {
-              case (elem1: Literal) :: (elem2: Call) :: Nil =>
-                elem1.code shouldBe ":b"
-                elem2.code shouldBe ":c => 1"
+            inside(arrayArg.astChildren.l) {
+              case (_: Call) :: (elem1: Call) :: (elem2: Call) :: (_: Identifier) :: Nil =>
+                elem1.code shouldBe "<tmp-1>[0] = :b"
+                elem2.code shouldBe "<tmp-1>[1] = :c => 1"
 
-                elem2.methodFullName shouldBe RubyDefines.RubyOperators.association
+                elem1.methodFullName shouldBe Operators.assignment
+                elem2.methodFullName shouldBe Operators.assignment
+                elem2.argument(2).asInstanceOf[Call].methodFullName shouldBe RubyOperators.association
               case xs => fail(s"Expected two args for elements, got ${xs.code.mkString(",")}")
             }
-          case xs => fail(s"Expected two args, got ${xs.code.mkString(",")}")
+          case xs => fail(s"Expected two args, got ${xs.map(x => x.label -> x.code).mkString(",")}")
         }
       case xs => fail(s"Expected one call for foo, got ${xs.code.mkString}")
     }
@@ -508,18 +509,17 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
         |""".stripMargin)
 
     inside(cpg.call.name("permit").argument.l) {
-      case _ :: (strLiteral: Literal) :: (numericLiteral: Literal) :: (issueSplat: Call) :: (sentryAssoc: Call) :: Nil =>
+      case _ :: (strLiteral: Literal) :: (numericLiteral: Literal) :: (issueSplat: Call) :: (sentryAssoc: Block) :: Nil =>
         issueSplat.code shouldBe "*issue_params_attributes"
         issueSplat.methodFullName shouldBe RubyOperators.splat
 
         sentryAssoc.code shouldBe "[:sentry_issue_identifier]"
-        sentryAssoc.methodFullName shouldBe Operators.arrayInitializer
 
         strLiteral.code shouldBe "\"1234\""
-        strLiteral.typeFullName shouldBe RubyDefines.getBuiltInType(RubyDefines.String)
+        strLiteral.typeFullName shouldBe RubyDefines.prefixAsCoreType(RubyDefines.String)
 
         numericLiteral.code shouldBe "10"
-        numericLiteral.typeFullName shouldBe RubyDefines.getBuiltInType(RubyDefines.Integer)
+        numericLiteral.typeFullName shouldBe RubyDefines.prefixAsCoreType(RubyDefines.Integer)
       case xs => fail(s"Expected 6 parameters for call, got [${xs.code.mkString(", ")}]")
     }
   }
@@ -565,6 +565,22 @@ class CallTests extends RubyCode2CpgFixture(withPostProcessing = true) {
           case xs => fail(s"Expected lhs and rhs for association, got [${xs.code.mkString(",")}]")
         }
       case xs => fail(s"Expected two params, got [${xs.code.mkString(",")}]")
+    }
+  }
+
+  "A Set instantiation with a 'brackets' call" should {
+    val cpg = code("Set[]")
+
+    "be a call with name '[]'" in {
+      inside(cpg.call.nameExact("[]").l) { case bracketCall :: Nil =>
+        bracketCall.code shouldBe "(<tmp-0> = Set).[]()"
+        bracketCall.name shouldBe "[]"
+        inside(bracketCall.argument.l) { case (tmpBase: Identifier) :: Nil =>
+          tmpBase.name shouldBe "<tmp-0>"
+          tmpBase.code shouldBe "<tmp-0>"
+          tmpBase.argumentIndex shouldBe 0
+        }
+      }
     }
   }
 }

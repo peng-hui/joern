@@ -59,7 +59,7 @@ trait AstForCallExpressionsCreator { this: AstCreator =>
     val expressionTypeFullName =
       expressionReturnTypeFullName(call).orElse(getTypeFullName(expectedReturnType)).map(typeInfoCalc.registerType)
 
-    val argumentTypes = argumentTypesForMethodLike(maybeResolvedCall)
+    val argumentTypes = argumentTypesForMethodLike(maybeResolvedCall.toOption)
     val returnType = maybeResolvedCall
       .map { resolvedCall =>
         typeInfoCalc.fullName(resolvedCall.getReturnType, ResolvedTypeParametersMap.empty())
@@ -113,7 +113,7 @@ trait AstForCallExpressionsCreator { this: AstCreator =>
     val thisIdentifier =
       identifierNode(call, NameConstants.This, NameConstants.This, typeFullName)
     scope.lookupVariable(NameConstants.This) match {
-      case SimpleVariable(ScopeParameter(thisParam)) => diffGraph.addEdge(thisIdentifier, thisParam, EdgeTypes.REF)
+      case SimpleVariable(ScopeParameter(thisParam, _)) => diffGraph.addEdge(thisIdentifier, thisParam, EdgeTypes.REF)
       case _ => // Do nothing. This shouldn't happen for valid code, but could occur in cases where methods could not be resolved
     }
     val thisAst = Ast(thisIdentifier)
@@ -150,7 +150,9 @@ trait AstForCallExpressionsCreator { this: AstCreator =>
       inlinedAstsForObjectCreationExpr(expr, Ast(assignTarget.copy), expectedType, resetAssignmentTargetType = true)
 
     assignTarget.typeFullName(allocAndInitAst.allocAst.rootType.getOrElse(defaultTypeFallback()))
-    val tmpLocal = localNode(expr, tmpName, tmpName, assignTarget.typeFullName)
+    val genericSignature = binarySignatureCalculator.variableBinarySignature(expr.getType)
+    val tmpLocal =
+      localNode(expr, tmpName, tmpName, assignTarget.typeFullName, genericSignature = Option(genericSignature))
 
     val allocAssignCode = s"$tmpName = ${allocAndInitAst.allocAst.rootCodeOrEmpty}"
     val allocAssignCall =
@@ -232,7 +234,7 @@ trait AstForCallExpressionsCreator { this: AstCreator =>
       scope.addLocalDecl(anonymousClassDecl)
     }
 
-    val argumentTypes = argumentTypesForMethodLike(maybeResolvedExpr)
+    val argumentTypes = argumentTypesForMethodLike(maybeResolvedExpr.toOption)
 
     val allocNode = newOperatorCallNode(
       Operators.alloc,

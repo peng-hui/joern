@@ -11,6 +11,10 @@ import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPFunction
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPVariable
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.joern.x2cpg.Defines as X2CpgDefines
+import io.joern.x2cpg.passes.frontend.MetaDataPass
+import io.shiftleft.codepropertygraph.generated.nodes.NewMethod
+import io.shiftleft.codepropertygraph.generated.nodes.NewTypeDecl
+import io.shiftleft.semanticcpg.language.types.structure.NamespaceTraversal
 import org.eclipse.cdt.internal.core.dom.parser.c.CASTFunctionDeclarator
 import org.eclipse.cdt.internal.core.dom.parser.c.CVariable
 
@@ -110,6 +114,28 @@ trait FullNameProvider { this: AstCreator =>
     StringUtils.normalizeSpace(name)
   }
 
+  private def fullNameForICPPASTLambdaExpression(): String = {
+    methodAstParentStack
+      .collectFirst {
+        case t: NewTypeDecl =>
+          if (t.name != NamespaceTraversal.globalNamespaceName) {
+            val globalFullName = MetaDataPass.getGlobalNamespaceBlockFullName(Some(filename))
+            s"$globalFullName.${t.fullName}"
+          } else {
+            t.fullName
+          }
+        case m: NewMethod =>
+          val fullNameWithoutSignature = m.fullName.stripSuffix(s":${m.signature}")
+          if (!m.name.startsWith("<lambda>") && m.name != NamespaceTraversal.globalNamespaceName) {
+            val globalFullName = MetaDataPass.getGlobalNamespaceBlockFullName(Some(filename))
+            s"$globalFullName.$fullNameWithoutSignature"
+          } else {
+            fullNameWithoutSignature
+          }
+      }
+      .mkString("")
+  }
+
   protected def fullName(node: IASTNode): String = {
     fullNameFromBinding(node) match {
       case Some(fullName) =>
@@ -127,6 +153,7 @@ trait FullNameProvider { this: AstCreator =>
           case d: IASTIdExpression                               => ASTStringUtil.getSimpleName(d.getName)
           case u: IASTUnaryExpression                            => code(u.getOperand)
           case x: ICPPASTQualifiedName                           => fixQualifiedName(ASTStringUtil.getQualifiedName(x))
+          case _: ICPPASTLambdaExpression                        => fullNameForICPPASTLambdaExpression()
           case other if other != null && other.getParent != null => fullName(other.getParent)
           case other if other != null                            => notHandledYet(other); ""
           case null                                              => ""
@@ -147,11 +174,11 @@ trait FullNameProvider { this: AstCreator =>
   ): String = {
     fullName match {
       case f if methodLike.isInstanceOf[ICPPASTLambdaExpression] && (f.contains("[") || f.contains("{")) =>
-        s"${X2CpgDefines.UnresolvedNamespace}.$name"
+        s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature"
       case f if methodLike.isInstanceOf[ICPPASTLambdaExpression] && f.isEmpty =>
-        name
+        s"$name:$signature"
       case f if methodLike.isInstanceOf[ICPPASTLambdaExpression] =>
-        s"$f.$name"
+        s"$f.$name:$signature"
       case f if isCPPFunction(methodLike) && (f.isEmpty || f == s"${X2CpgDefines.UnresolvedNamespace}.") =>
         s"${X2CpgDefines.UnresolvedNamespace}.$name:$signature"
       case f if isCPPFunction(methodLike) && f.contains("?") =>
@@ -164,14 +191,27 @@ trait FullNameProvider { this: AstCreator =>
   }
 
   private def returnTypeForIASTFunctionDeclarator(declarator: IASTFunctionDeclarator): String = {
-    cleanType(typeForDeclSpecifier(declarator.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier))
+    safeGetBinding(declarator.getName) match {
+      case Some(value: ICPPMethod) =>
+        cleanType(value.getType.getReturnType.toString)
+      case _ if declarator.getParent.isInstanceOf[IASTSimpleDeclaration] =>
+        cleanType(typeForDeclSpecifier(declarator.getParent.asInstanceOf[IASTSimpleDeclaration].getDeclSpecifier))
+      case _ if declarator.getParent.isInstanceOf[IASTFunctionDefinition] =>
+        cleanType(typeForDeclSpecifier(declarator.getParent.asInstanceOf[IASTFunctionDefinition].getDeclSpecifier))
+      case _ => Defines.Any
+    }
   }
 
   private def returnTypeForIASTFunctionDefinition(definition: IASTFunctionDefinition): String = {
     if (isCppConstructor(definition)) {
       typeFor(definition.asInstanceOf[CPPASTFunctionDefinition].getMemberInitializers.head.getInitializer)
     } else {
-      typeForDeclSpecifier(definition.getDeclSpecifier)
+      safeGetBinding(definition.getDeclarator.getName) match {
+        case Some(value: ICPPMethod) =>
+          cleanType(value.getType.getReturnType.toString)
+        case _ =>
+          typeForDeclSpecifier(definition.getDeclSpecifier)
+      }
     }
   }
 
@@ -181,7 +221,11 @@ trait FullNameProvider { this: AstCreator =>
         Option(declarator.getTrailingReturnType)
           .map(id => typeForDeclSpecifier(id.getDeclSpecifier))
           .getOrElse(Defines.Any)
-      case null => Defines.Any
+      case null =>
+        safeGetEvaluation(lambda) match {
+          case Some(value) if !value.toString.endsWith(": <unknown>") => cleanType(value.getType.toString)
+          case _                                                      => Defines.Any
+        }
     }
   }
 
@@ -207,7 +251,7 @@ trait FullNameProvider { this: AstCreator =>
   }
 
   private def shortNameForIASTDeclarator(declarator: IASTDeclarator): String = {
-    Try(declarator.getName.resolveBinding().getName).getOrElse {
+    safeGetBinding(declarator.getName).map(_.getName).getOrElse {
       if (ASTStringUtil.getSimpleName(declarator.getName).isEmpty && declarator.getNestedDeclarator != null) {
         shortName(declarator.getNestedDeclarator)
       } else {
@@ -280,9 +324,9 @@ trait FullNameProvider { this: AstCreator =>
           case _ => None
         }
       case declarator: CPPASTFunctionDeclarator =>
-        declarator.getName.resolveBinding() match {
-          case function: ICPPFunction if declarator.getName.isInstanceOf[ICPPASTConversionName] =>
-            val tpe = typeFor(declarator.getName.asInstanceOf[ICPPASTConversionName].getTypeId)
+        safeGetBinding(declarator.getName) match {
+          case Some(function: ICPPFunction) if declarator.getName.isInstanceOf[ICPPASTConversionName] =>
+            val tpe = cleanType(typeFor(declarator.getName.asInstanceOf[ICPPASTConversionName].getTypeId))
             val fullNameNoSig = fixQualifiedName(
               function.getQualifiedName.takeWhile(!_.startsWith("operator ")).mkString(".")
             )
@@ -292,15 +336,20 @@ trait FullNameProvider { this: AstCreator =>
               s"$fullNameNoSig.$tpe:${functionTypeToSignature(function.getType)}"
             }
             Option(fn)
-          case function: ICPPFunction =>
+          case Some(function: ICPPFunction) =>
             val fullNameNoSig = fixQualifiedName(replaceOperator(function.getQualifiedName.mkString(".")))
             val fn = if (function.isExternC) {
               replaceOperator(function.getName)
             } else {
-              s"$fullNameNoSig:${functionTypeToSignature(function.getType)}"
+              val returnTpe = declarator.getParent match {
+                case definition: ICPPASTFunctionDefinition if !isCppConstructor(definition) => returnType(definition)
+                case _ => safeGetType(function.getType.getReturnType)
+              }
+              val sig = signature(cleanType(returnTpe), declarator)
+              s"$fullNameNoSig:$sig"
             }
             Option(fn)
-          case x @ (_: ICPPField | _: CPPVariable) =>
+          case Some(x @ (_: ICPPField | _: CPPVariable)) =>
             val fullNameNoSig = fixQualifiedName(x.getQualifiedName.mkString("."))
             val fn = if (x.isExternC) {
               x.getName
@@ -308,42 +357,48 @@ trait FullNameProvider { this: AstCreator =>
               s"$fullNameNoSig:${cleanType(safeGetType(x.getType))}"
             }
             Option(fn)
-          case _: IProblemBinding =>
+          case Some(_: IProblemBinding) =>
             val fullNameNoSig = replaceOperator(ASTStringUtil.getQualifiedName(declarator.getName))
             val fixedFullName = fixQualifiedName(fullNameNoSig)
+            val returnTpe = declarator.getParent match {
+              case definition: ICPPASTFunctionDefinition if !isCppConstructor(definition) => returnType(definition)
+              case _                                                                      => returnType(declarator)
+            }
+            val signature_ = signature(returnTpe, declarator)
             if (fixedFullName.isEmpty) {
-              Option(s"${X2CpgDefines.UnresolvedNamespace}:${X2CpgDefines.UnresolvedSignature}")
+              Option(s"${X2CpgDefines.UnresolvedNamespace}:$signature_")
             } else {
-              Option(s"$fixedFullName:${X2CpgDefines.UnresolvedSignature}")
+              Option(s"$fixedFullName:$signature_")
             }
           case _ => None
         }
       case declarator: CASTFunctionDeclarator =>
-        declarator.getName.resolveBinding() match {
-          case cVariable: CVariable => Option(cVariable.getName)
-          case _                    => Option(declarator.getName.toString)
+        safeGetBinding(declarator.getName) match {
+          case Some(cVariable: CVariable)     => Option(cVariable.getName)
+          case Some(cppVariable: CPPVariable) => Option(cppVariable.getName)
+          case _                              => Option(declarator.getName.toString)
         }
       case definition: ICPPASTFunctionDefinition =>
         Some(fullName(definition.getDeclarator))
       case namespace: ICPPASTNamespaceDefinition =>
-        namespace.getName.resolveBinding() match {
-          case b: ICPPBinding => Option(b.getQualifiedName.mkString("."))
-          case _              => None
+        safeGetBinding(namespace.getName) match {
+          case Some(b: ICPPBinding) if b.getName.nonEmpty => Option(b.getQualifiedName.mkString("."))
+          case _                                          => None
         }
       case compType: IASTCompositeTypeSpecifier =>
-        compType.getName.resolveBinding() match {
-          case b: ICPPBinding => Option(b.getQualifiedName.mkString("."))
-          case _              => None
+        safeGetBinding(compType.getName) match {
+          case Some(b: ICPPBinding) if b.getName.nonEmpty => Option(b.getQualifiedName.mkString("."))
+          case _                                          => None
         }
       case enumSpecifier: IASTEnumerationSpecifier =>
-        enumSpecifier.getName.resolveBinding() match {
-          case b: ICPPBinding => Option(b.getQualifiedName.mkString("."))
-          case _              => None
+        safeGetBinding(enumSpecifier.getName) match {
+          case Some(b: ICPPBinding) if b.getName.nonEmpty => Option(b.getQualifiedName.mkString("."))
+          case _                                          => None
         }
       case e: IASTElaboratedTypeSpecifier =>
-        e.getName.resolveBinding() match {
-          case b: ICPPBinding => Option(b.getQualifiedName.mkString("."))
-          case _              => None
+        safeGetBinding(e.getName) match {
+          case Some(b: ICPPBinding) if b.getName.nonEmpty => Option(b.getQualifiedName.mkString("."))
+          case _                                          => None
         }
       case _ => None
     }

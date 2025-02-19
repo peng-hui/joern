@@ -317,8 +317,8 @@ class MacroHandlingTests extends C2CpgSuite {
           |}
           |""".stripMargin)
       cpg.local.count(l => l._astIn.isEmpty) shouldBe 0
-      cpg.local.count(l => l._astIn.size == 1) shouldBe 4
       cpg.local.count(l => l._astIn.size > 1) shouldBe 0
+      cpg.local.count(l => l._astIn.size == 1) shouldBe 3
     }
 
     "only have locals with exactly one ast parent" in {
@@ -342,6 +342,18 @@ class MacroHandlingTests extends C2CpgSuite {
       bar._astIn.size shouldBe 1
       val List(baz) = cpg.local.nameExact("baz").l
       baz._astIn.size shouldBe 1
+    }
+
+    "only have local for declaration and not from assignment from broken macro" in {
+      val cpg = code("""
+          |#define FOO() (long)va_arg(ap, int)
+          |void func(void) {
+          |  int foo;
+          |  foo = FOO();
+          |  foo = FOO();
+          |}
+          |""".stripMargin)
+      cpg.local.nameExact("foo").size shouldBe 1
     }
   }
 }

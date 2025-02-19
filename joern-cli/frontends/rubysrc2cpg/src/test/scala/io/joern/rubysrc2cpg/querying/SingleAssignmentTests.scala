@@ -2,7 +2,7 @@ package io.joern.rubysrc2cpg.querying
 
 import io.joern.rubysrc2cpg.passes.Defines as RubyDefines
 import io.joern.rubysrc2cpg.testfixtures.RubyCode2CpgFixture
-import io.shiftleft.codepropertygraph.generated.nodes.{Block, Call, Identifier, Literal}
+import io.shiftleft.codepropertygraph.generated.nodes.{Call, Identifier, Literal}
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
 import io.shiftleft.semanticcpg.language.*
 
@@ -45,7 +45,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
 
   "`||=` is represented by a lowered if call to .nil?" in {
     val cpg = code("""
-        |def foo
+        |def foo(x)
         |  x ||= false
         |end
         |""".stripMargin)
@@ -53,7 +53,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("x.nil?")
+        ifStruct.condition.code.l shouldBe List("!x")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>
@@ -70,7 +70,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
 
   "`&&=` is represented by lowered if call to .nil?" in {
     val cpg = code("""
-        |def foo
+        |def foo(x)
         |  x &&= true
         |end
         |""".stripMargin)
@@ -78,7 +78,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("!x.nil?")
+        ifStruct.condition.code.l shouldBe List("x")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>
@@ -292,13 +292,13 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
 
                 inside(lhs.argument.l) {
                   case base :: (index: Literal) :: Nil =>
-                    index.typeFullName shouldBe RubyDefines.getBuiltInType(RubyDefines.Symbol)
+                    index.typeFullName shouldBe RubyDefines.prefixAsCoreType(RubyDefines.Symbol)
                   case xs => fail(s"Expected base and index, got [${xs.code.mkString(",")}]")
                 }
 
                 inside(rhs.argument.l) {
                   case base :: (index: Literal) :: Nil =>
-                    index.typeFullName shouldBe RubyDefines.getBuiltInType(RubyDefines.Symbol)
+                    index.typeFullName shouldBe RubyDefines.prefixAsCoreType(RubyDefines.Symbol)
                   case xs => fail(s"Expected base and index, got [${xs.code.mkString(",")}]")
                 }
 
@@ -319,7 +319,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("(<tmp-0> = hash[:id]).nil?")
+        ifStruct.condition.code.l shouldBe List("!hash[:id]")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>
@@ -363,7 +363,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("!hash[:id].nil?")
+        ifStruct.condition.code.l shouldBe List("hash[:id]")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>
@@ -408,7 +408,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("(<tmp-0> = A.B).nil?")
+        ifStruct.condition.code.l shouldBe List("!A.B")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>
@@ -436,7 +436,7 @@ class SingleAssignmentTests extends RubyCode2CpgFixture {
     inside(cpg.method.name("foo").controlStructure.l) {
       case ifStruct :: Nil =>
         ifStruct.controlStructureType shouldBe ControlStructureTypes.IF
-        ifStruct.condition.code.l shouldBe List("!A.B.nil?")
+        ifStruct.condition.code.l shouldBe List("A.B")
 
         inside(ifStruct.whenTrue.ast.isCall.name(Operators.assignment).l) {
           case assignmentCall :: Nil =>

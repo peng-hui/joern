@@ -27,7 +27,7 @@ import com.github.javaparser.resolution.declarations.{
 import com.github.javaparser.resolution.types.ResolvedType
 import com.github.javaparser.resolution.types.parametrization.ResolvedTypeParametersMap
 import com.github.javaparser.symbolsolver.JavaSymbolSolver
-import io.joern.javasrc2cpg.astcreation.declarations.AstForDeclarationsCreator
+import io.joern.javasrc2cpg.astcreation.declarations.{AstForDeclarationsCreator, BinarySignatureCalculator}
 import io.joern.javasrc2cpg.astcreation.expressions.AstForExpressionsCreator
 import io.joern.javasrc2cpg.astcreation.statements.AstForStatementsCreator
 import io.joern.javasrc2cpg.scope.Scope
@@ -107,6 +107,7 @@ class AstCreator(
   private[astcreation] val typeInfoCalc: TypeInfoCalculator =
     TypeInfoCalculator(global, symbolSolver, keepTypeArguments)
   private[astcreation] val bindingTableCache = mutable.HashMap.empty[String, BindingTable]
+  private[astcreation] val binarySignatureCalculator: BinarySignatureCalculator = new BinarySignatureCalculator(scope)
 
   private[astcreation] val tempNameProvider: TemporaryNameProvider = new TemporaryNameProvider
 
@@ -140,14 +141,22 @@ class AstCreator(
   }
 
   private[astcreation] def defaultTypeFallback(typ: Type): String = {
+    defaultTypeFallback(code(typ))
+  }
+
+  private[astcreation] def defaultTypeFallback(typ: String): String = {
     if (disableTypeFallback) {
-      s"${Defines.UnresolvedNamespace}.${Util.stripGenericTypes(code(typ))}"
+      s"${Defines.UnresolvedNamespace}.${Util.stripGenericTypes(typ)}"
     } else
       TypeConstants.Any
   }
 
   private[astcreation] def defaultTypeFallback(): String = {
     TypeConstants.Any
+  }
+
+  private[astcreation] def isResolvedTypeFullName(typeFullName: String): Boolean = {
+    typeFullName != TypeConstants.Any && !typeFullName.startsWith(Defines.UnresolvedNamespace)
   }
 
   /** Custom printer that omits comments. To be used by [[code]] */
@@ -368,8 +377,10 @@ class AstCreator(
     case _                       => None
   }
 
-  def argumentTypesForMethodLike(maybeResolvedMethodLike: Try[ResolvedMethodLikeDeclaration]): Option[List[String]] = {
-    maybeResolvedMethodLike.toOption
+  def argumentTypesForMethodLike(
+    maybeResolvedMethodLike: Option[ResolvedMethodLikeDeclaration]
+  ): Option[List[String]] = {
+    maybeResolvedMethodLike
       .flatMap(calcParameterTypes(_, ResolvedTypeParametersMap.empty()))
   }
 

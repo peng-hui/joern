@@ -270,15 +270,23 @@ class AstGenRunner(config: Config) {
 
   private def filterFiles(files: List[String], out: File): List[String] = {
     files.filter { file =>
-      file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match {
-        // We are not interested in JS / TS type definition files at this stage.
-        // TODO: maybe we can enable that later on and use the type definitions there
-        //  for enhancing the CPG with additional type information for functions
-        case filePath if TypeDefinitionFileExtensions.exists(filePath.endsWith) => false
-        case filePath if isIgnoredByUserConfig(filePath)                        => false
-        case filePath if isIgnoredByDefault(filePath)                           => false
-        case filePath if isTranspiledFile(filePath)                             => false
-        case _                                                                  => true
+      Try {
+        file.stripSuffix(".json").replace(out.pathAsString, config.inputPath) match {
+          // We are not interested in JS / TS type definition files at this stage.
+          // TODO: maybe we can enable that later on and use the type definitions there
+          //  for enhancing the CPG with additional type information for functions
+          case filePath if TypeDefinitionFileExtensions.exists(filePath.endsWith) => false
+          case filePath if isIgnoredByUserConfig(filePath)                        => false
+          case filePath if isIgnoredByDefault(filePath)                           => false
+          case filePath if isTranspiledFile(filePath)                             => false
+          case _                                                                  => true
+        }
+      } match {
+        case Success(result)    => result
+        case Failure(exception) =>
+          // Log the exception for debugging purposes
+          logger.error("An error occurred while processing the file path during filtering file stage : ", exception)
+          false
       }
     }
   }
@@ -394,7 +402,9 @@ class AstGenRunner(config: Config) {
         AstGenRunnerResult(parsed.map((in.toString(), _)), skipped.map((in.toString(), _)))
       case Failure(f) =>
         logger.error("\t- running astgen failed!", f)
-        AstGenRunnerResult()
+        val parsed  = checkParsedFiles(filterFiles(SourceFiles.determine(out.toString(), Set(".json")), out), in)
+        val skipped = List.empty
+        AstGenRunnerResult(parsed.map((in.toString(), _)), skipped.map((in.toString(), _)))
     }
   }
 

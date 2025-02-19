@@ -126,12 +126,12 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
           }
           .collectFirst {
             // ignore an import to a file that defines the type
-            case TypeImportInfoWithProvidence(TypeImportInfo(_, importPath), _) if importPath != currPath =>
-              importPath -> createRequireCall(builder, importPath)
+            case TypeImportInfoWithProvidence(TypeImportInfo(_, importPath), _) if importPath != currPath => importPath
           }
       }
-      .distinctBy { case (importPath, _) => importPath }
-      .foreach { case (_, requireCall) =>
+      .distinct
+      .foreach { importPath =>
+        val requireCall = createRequireCall(builder, importPath)
         requireCall.order(currOrder)
         builder.addEdge(moduleMethod.block, requireCall, EdgeTypes.AST)
         currOrder += 1
@@ -148,7 +148,7 @@ class ImplicitRequirePass(cpg: Cpg, externalTypes: Seq[TypeImportInfo] = Nil)
     builder.addNode(requireCallNode)
     // Create literal argument
     val pathLiteralNode =
-      NewLiteral().code(s"'$path'").typeFullName(s"$kernelPrefix.String").argumentIndex(1).order(2)
+      NewLiteral().code(s"'$path'").typeFullName(s"$builtinPrefix.String").argumentIndex(1).order(2)
     builder.addEdge(requireCallNode, pathLiteralNode, EdgeTypes.AST)
     builder.addEdge(requireCallNode, pathLiteralNode, EdgeTypes.ARGUMENT)
     requireCallNode

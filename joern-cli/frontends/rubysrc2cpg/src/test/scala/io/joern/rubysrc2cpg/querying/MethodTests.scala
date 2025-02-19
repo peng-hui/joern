@@ -2,7 +2,6 @@ package io.joern.rubysrc2cpg.querying
 
 import io.joern.rubysrc2cpg.passes.Defines as RDefines
 import io.joern.rubysrc2cpg.passes.Defines.{Main, RubyOperators}
-import io.joern.rubysrc2cpg.passes.GlobalTypes.kernelPrefix
 import io.joern.rubysrc2cpg.testfixtures.RubyCode2CpgFixture
 import io.shiftleft.codepropertygraph.generated.nodes.*
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, NodeTypes, Operators}
@@ -273,7 +272,7 @@ class MethodTests extends RubyCode2CpgFixture {
           xs.name shouldBe "xs"
           xs.code shouldBe "*xs"
           xs.isVariadic shouldBe true
-          xs.typeFullName shouldBe s"$kernelPrefix.Array"
+          xs.typeFullName shouldBe RDefines.prefixAsCoreType("Array")
         case xs => fail(s"Expected `foo` to have one parameter, got [${xs.code.mkString(", ")}]")
       }
     }
@@ -284,7 +283,7 @@ class MethodTests extends RubyCode2CpgFixture {
           ys.name shouldBe "ys"
           ys.code shouldBe "**ys"
           ys.isVariadic shouldBe true
-          ys.typeFullName shouldBe s"$kernelPrefix.Hash"
+          ys.typeFullName shouldBe RDefines.prefixAsCoreType("Hash")
         case xs => fail(s"Expected `foo` to have one parameter, got [${xs.code.mkString(", ")}]")
       }
     }
@@ -323,7 +322,7 @@ class MethodTests extends RubyCode2CpgFixture {
               x.name shouldBe "x"
               bar.name shouldBe "bar="
 
-              bar.parameter.name.l shouldBe List("self", "*args", "&block")
+              bar.parameter.name.l shouldBe List("self", "args", "&block")
               // bar forwards parameters to a call to the aliased method
               inside(bar.call.name("x=").l) {
                 case barCall :: Nil =>
@@ -347,6 +346,60 @@ class MethodTests extends RubyCode2CpgFixture {
         case xs => fail(s"Expected a single type decl for `Foo`, instead got [${xs.code.mkString(",")}]")
       }
     }
+  }
+
+  "aliased methods with `alias_method`" should {
+    val cpg = code("""
+        |class Foo
+        |  def aliasable(bbb)
+        |    puts bbb
+        |  end
+        |
+        |  alias_method :print_something, :aliasable
+        |
+        |  def someMethod(aaa)
+        |    print_something(aaa)
+        |  end
+        |end
+        |
+        |""".stripMargin)
+
+    "similarly alias the method as if it were calling `alias`" in {
+      inside(cpg.typeDecl("Foo").l) {
+        case foo :: Nil =>
+          inside(foo.method.nameNot(RDefines.Initialize, RDefines.TypeDeclBody).l) {
+            case a :: p :: s :: Nil =>
+              a.name shouldBe "aliasable"
+              p.name shouldBe "print_something"
+              s.name shouldBe "someMethod"
+
+              p.parameter.name.l shouldBe List("self", "args", "&block")
+              // bar forwards parameters to a call to the aliased method
+              inside(p.call.name("aliasable").l) {
+                case aliasableCall :: Nil =>
+                  inside(aliasableCall.argument.l) {
+                    case _ :: (args: Call) :: (blockId: Identifier) :: Nil =>
+                      args.name shouldBe RubyOperators.splat
+                      args.code shouldBe "*args"
+                      args.argumentIndex shouldBe 1
+
+                      blockId.name shouldBe "&block"
+                      blockId.code shouldBe "&block"
+                      blockId.argumentIndex shouldBe 2
+                    case xs =>
+                      fail(
+                        s"Expected a two arguments for the call `aliasable`,  instead got [${xs.code.mkString(",")}]"
+                      )
+                  }
+                  aliasableCall.code shouldBe "aliasable(*args, &block)"
+                case xs => fail(s"Expected a single call to `aliasable`,  instead got [${xs.code.mkString(",")}]")
+              }
+            case xs => fail(s"Expected a three virtual methods under `Foo`, instead got [${xs.code.mkString(",")}]")
+          }
+        case xs => fail(s"Expected a single type decl for `Foo`, instead got [${xs.code.mkString(",")}]")
+      }
+    }
+
   }
 
   "Singleton Methods for module scope" should {
@@ -407,6 +460,20 @@ class MethodTests extends RubyCode2CpgFixture {
         case _ => fail("Expected one Method for <block>")
       }
     }
+  }
+
+  "Singleton methods binding to an unresolvable variable/type should bind to the next AST parent" in {
+    val cpg = code("""
+        |class C
+        | def something.foo
+        | end
+        |end
+        |""".stripMargin)
+
+    val foo = cpg.method.nameExact("foo").head
+
+    foo.definingTypeDecl.map(_.name) shouldBe Option("C")
+    foo.astParent shouldBe cpg.typeDecl("C").head
   }
 
   "A Boolean method" should {
@@ -905,10 +972,10 @@ class MethodTests extends RubyCode2CpgFixture {
         inside(barCall.argument.l) {
           case _ :: (arg1: Literal) :: (arg2: Literal) :: Nil =>
             arg1.code shouldBe "1"
-            arg1.typeFullName shouldBe RDefines.getBuiltInType(RDefines.Integer)
+            arg1.typeFullName shouldBe RDefines.prefixAsCoreType(RDefines.Integer)
 
             arg2.code shouldBe "2"
-            arg2.typeFullName shouldBe RDefines.getBuiltInType(RDefines.Integer)
+            arg2.typeFullName shouldBe RDefines.prefixAsCoreType(RDefines.Integer)
           case xs => fail(s"Expected three args, got [${xs.code.mkString(",")}]")
         }
 

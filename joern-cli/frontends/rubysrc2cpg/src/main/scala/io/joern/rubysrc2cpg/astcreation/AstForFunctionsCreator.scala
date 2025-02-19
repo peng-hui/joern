@@ -205,7 +205,10 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode) { th
 
     val methodAst = node.method match {
       case m: ProcedureDeclaration => astsForStatement(m)
-      case x                       => logger.warn(s"Unhandled method reference from AST type ${x.getClass}"); Nil
+      case x                       =>
+        // Not sure how we should represent dynamically setting access modifiers based on method refs
+        logger.debug(s"Unhandled method reference from AST type ${x.getClass}")
+        Nil
     }
 
     popAccessModifier()
@@ -308,19 +311,20 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode) { th
         Ast() // The proc parameter is retrieved later under method AST creation
       case node: CollectionParameter =>
         val typeFullName = node match {
-          case ArrayParameter(_) => prefixAsKernelDefined("Array")
-          case HashParameter(_)  => prefixAsKernelDefined("Hash")
+          case ArrayParameter(_) => prefixAsCoreType("Array")
+          case HashParameter(_)  => prefixAsCoreType("Hash")
         }
+        val name = node.name.stripPrefix("*")
         val parameterIn = parameterInNode(
           node = node,
-          name = node.name,
+          name = name,
           code = code(node),
           index = index,
           isVariadic = true,
           evaluationStrategy = EvaluationStrategies.BY_REFERENCE,
           typeFullName = Option(typeFullName)
         )
-        scope.addToScope(node.name, parameterIn)
+        scope.addToScope(name, parameterIn)
         Ast(parameterIn)
       case node: GroupedParameter =>
         val parameterIn = parameterInNode(
@@ -425,14 +429,6 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode) { th
         )
         val methodTypeDecl_   = typeDeclNode(node, node.methodName, fullName, relativeFileName, code(node))
         val methodTypeDeclAst = Ast(methodTypeDecl_)
-        astParentType.orElse(scope.surroundingAstLabel).foreach { t =>
-          methodTypeDecl_.astParentType(t)
-          method.astParentType(t)
-        }
-        astParentFullName.orElse(scope.surroundingScopeFullName).foreach { fn =>
-          methodTypeDecl_.astParentFullName(fn)
-          method.astParentFullName(fn)
-        }
 
         createMethodTypeBindings(method, methodTypeDecl_)
 
@@ -463,6 +459,15 @@ trait AstForFunctionsCreator(implicit withSchemaValidation: ValidationMode) { th
         }
 
         scope.popScope()
+
+        astParentType.orElse(scope.surroundingAstLabel).foreach { t =>
+          methodTypeDecl_.astParentType(t)
+          method.astParentType(t)
+        }
+        astParentFullName.orElse(scope.surroundingScopeFullName).foreach { fn =>
+          methodTypeDecl_.astParentFullName(fn)
+          method.astParentFullName(fn)
+        }
 
         // The member for these types refers to the singleton class
         val member = memberForMethod(method, Option(NodeTypes.TYPE_DECL), astParentFullName.map(x => s"$x<class>"))

@@ -2,11 +2,12 @@ package io.joern.csharpsrc2cpg.astcreation
 
 import io.joern.csharpsrc2cpg.parser.DotNetJsonAst.*
 import io.joern.csharpsrc2cpg.parser.{DotNetJsonAst, DotNetNodeInfo, ParserKeys}
+import io.joern.csharpsrc2cpg.utils.Utils.{withoutSignature}
 import io.joern.csharpsrc2cpg.{CSharpDefines, Constants, astcreation}
 import io.joern.x2cpg.utils.IntervalKeyPool
 import io.joern.x2cpg.{Ast, Defines, ValidationMode}
 import io.shiftleft.codepropertygraph.generated.nodes.*
-import io.shiftleft.codepropertygraph.generated.{DispatchTypes, Operators, PropertyNames}
+import io.shiftleft.codepropertygraph.generated.{Operators, PropertyNames}
 import ujson.Value
 
 import scala.annotation.tailrec
@@ -30,15 +31,6 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
       }
   }
 
-  def createCallNodeForOperator(
-    node: DotNetNodeInfo,
-    operatorMethod: String,
-    signature: Option[String] = None,
-    typeFullName: Option[String] = None
-  ): NewCall = {
-    callNode(node, node.code, operatorMethod, operatorMethod, DispatchTypes.STATIC_DISPATCH, signature, typeFullName)
-  }
-
   protected def notHandledYet(node: DotNetNodeInfo): Seq[Ast] = {
     val text =
       s"""Node type '${node.node}' not handled yet!
@@ -53,7 +45,7 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
 
   protected def astFullName(node: DotNetNodeInfo): String = {
     scope.surroundingScopeFullName match
-      case Some(fullName) => s"$fullName.${nameFromNode(node)}"
+      case Some(fullName) => s"${withoutSignature(fullName)}.${nameFromNode(node)}"
       case _              => nameFromNode(node)
   }
 
@@ -99,6 +91,36 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
     Operators.lessEqualsThan    -> BuiltinTypes.DotNetTypeMap(BuiltinTypes.Bool)
   )
 
+  protected val binaryOperatorsMap: Map[String, String] = Map(
+    "+"   -> Operators.addition,
+    "-"   -> Operators.subtraction,
+    "*"   -> Operators.multiplication,
+    "/"   -> Operators.division,
+    "%"   -> Operators.modulo,
+    "=="  -> Operators.equals,
+    "!="  -> Operators.notEquals,
+    "&&"  -> Operators.logicalAnd,
+    "||"  -> Operators.logicalOr,
+    "="   -> Operators.assignment,
+    "+="  -> Operators.assignmentPlus,
+    "-="  -> Operators.assignmentMinus,
+    "*="  -> Operators.assignmentMultiplication,
+    "/="  -> Operators.assignmentDivision,
+    "%="  -> Operators.assignmentModulo,
+    "&="  -> Operators.assignmentAnd,
+    "|="  -> Operators.assignmentOr,
+    "^="  -> Operators.assignmentXor,
+    ">>=" -> Operators.assignmentLogicalShiftRight,
+    "<<=" -> Operators.assignmentShiftLeft,
+    ">"   -> Operators.greaterThan,
+    "<"   -> Operators.lessThan,
+    ">="  -> Operators.greaterEqualsThan,
+    "<="  -> Operators.lessEqualsThan,
+    "|"   -> Operators.or,
+    "&"   -> Operators.and,
+    "^"   -> Operators.xor
+  )
+
   protected def nodeTypeFullName(node: DotNetNodeInfo): String = {
     node.node match {
       case NumericLiteralExpression if node.code.matches("^\\d+$") => // e.g. 200
@@ -134,12 +156,22 @@ trait AstCreatorHelper(implicit withSchemaValidation: ValidationMode) { this: As
       case NullableType =>
         val elementTypeNode = createDotNetNodeInfo(node.json(ParserKeys.ElementType))
         nodeTypeFullName(elementTypeNode)
+      case QualifiedName =>
+        val left  = nameFromNode(createDotNetNodeInfo(node.json(ParserKeys.Left)))
+        val right = nameFromNode(createDotNetNodeInfo(node.json(ParserKeys.Right)))
+        s"$left.$right"
       case IdentifierName =>
         val typeString = nameFromNode(node)
         scope
           .tryResolveTypeReference(typeString)
           .map(_.name)
           .orElse(BuiltinTypes.DotNetTypeMap.get(typeString))
+          .orElse(scope.findFieldInScope(typeString).map(_.typeFullName))
+          .orElse(scope.lookupVariable(typeString).flatMap {
+            case x: NewLocal             => Some(x.typeFullName)
+            case x: NewMethodParameterIn => Some(x.typeFullName)
+            case _                       => None
+          })
           .getOrElse(typeString)
       case Attribute =>
         val typeString = s"${nameFromNode(node)}Attribute"
@@ -197,7 +229,7 @@ object AstCreatorHelper {
       case SimpleMemberAccessExpression | MemberBindingExpression | SuppressNullableWarningExpression | Attribute =>
         nameFromIdentifier(createDotNetNodeInfo(node.json(ParserKeys.Name)))
       case ObjectCreationExpression | CastExpression => nameFromNode(createDotNetNodeInfo(node.json(ParserKeys.Type)))
-      case ThisExpression                            => "this"
+      case ThisExpression                            => Constants.This
       case _                                         => "<empty>"
   }
 
@@ -280,6 +312,6 @@ object BuiltinTypes {
     String  -> "System.String",
     Dynamic -> "System.Object",
     Null    -> Null,
-    Void    -> Void
+    Void    -> "System.Void"
   )
 }

@@ -9,8 +9,7 @@ import org.eclipse.cdt.core.dom.ast.cpp.*
 import org.eclipse.cdt.internal.core.dom.parser.cpp.CPPASTAliasDeclaration
 import org.eclipse.cdt.internal.core.model.ASTStringUtil
 import io.joern.x2cpg.datastructures.Stack.*
-
-import scala.util.Try
+import org.apache.commons.lang3.StringUtils
 
 trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: AstCreator =>
 
@@ -19,8 +18,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
     case _                                   => false
   }
 
-  private def isTypeDef(decl: IASTSimpleDeclaration): Boolean =
-    code(decl).startsWith("typedef")
+  private def isTypeDef(decl: IASTSimpleDeclaration): Boolean = decl.getRawSignature.startsWith("typedef")
 
   private def templateParameters(e: IASTNode): Option[String] = {
     val templateDeclaration = e match {
@@ -63,13 +61,17 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
     Ast(cpgNamespace)
   }
 
+  private def isAssignmentFromBrokenMacro(declaration: IASTSimpleDeclaration, declarator: IASTDeclarator): Boolean =
+    declaration.getParent.isInstanceOf[IASTTranslationUnit] &&
+      declarator.getInitializer.isInstanceOf[IASTEqualsInitializer]
+
   protected def astForDeclarator(declaration: IASTSimpleDeclaration, declarator: IASTDeclarator, index: Int): Ast = {
     val name = shortName(declarator)
     declaration match {
       case d if isTypeDef(d) && shortName(d.getDeclSpecifier).nonEmpty =>
         val filename = fileName(declaration)
         val typeDefName = if (name.isEmpty) {
-          Try(declarator.getName.resolveBinding()).toOption.map(b => registerType(b.getName))
+          safeGetBinding(declarator.getName).map(b => registerType(b.getName))
         } else {
           Option(registerType(name))
         }
@@ -86,26 +88,33 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
         )
       case d if parentIsClassDef(d) =>
         val tpe = declarator match {
-          case _: IASTArrayDeclarator => registerType(typeFor(declarator))
-          case _                      => registerType(typeForDeclSpecifier(declaration.getDeclSpecifier))
+          case _: IASTArrayDeclarator => registerType(cleanType(typeFor(declarator)))
+          case _ => registerType(cleanType(typeForDeclSpecifier(declaration.getDeclSpecifier, index = index)))
         }
         Ast(memberNode(declarator, name, code(declarator), tpe))
-      case _ if declarator.isInstanceOf[IASTArrayDeclarator] =>
-        val tpe     = registerType(typeFor(declarator))
-        val codeTpe = typeFor(declarator, stripKeywords = false)
-        val node    = localNode(declarator, name, s"$codeTpe $name", tpe)
-        scope.addToScope(name, (node, tpe))
-        Ast(node)
+      case d if isAssignmentFromBrokenMacro(d, declarator) && scope.lookupVariable(name).nonEmpty =>
+        Ast()
       case _ =>
-        val tpe = registerType(
-          cleanType(typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = true, index))
-        )
-        val codeTpe = typeForDeclSpecifier(declaration.getDeclSpecifier, stripKeywords = false, index)
-        val node    = localNode(declarator, name, s"$codeTpe $name", tpe)
+        val tpe = declarator match {
+          case arrayDecl: IASTArrayDeclarator => registerType(cleanType(typeFor(arrayDecl)))
+          case _ => registerType(cleanType(typeForDeclSpecifier(declaration.getDeclSpecifier, index = index)))
+        }
+        val code = codeForDeclarator(declaration, declarator)
+        val node = localNode(declarator, name, code, tpe)
         scope.addToScope(name, (node, tpe))
         Ast(node)
     }
+  }
 
+  private def codeForDeclarator(declaration: IASTSimpleDeclaration, declarator: IASTDeclarator): String = {
+    val specCode    = declaration.getDeclSpecifier.getRawSignature
+    val declCodeRaw = declarator.getRawSignature
+    val declCode = declarator.getInitializer match {
+      case null => declCodeRaw
+      case _    => declCodeRaw.replace(declarator.getInitializer.getRawSignature, "")
+    }
+    val normalizedCode = StringUtils.normalizeSpace(s"$specCode $declCode")
+    normalizedCode.strip()
   }
 
   protected def astForInitializer(declarator: IASTDeclarator, init: IASTInitializer): Ast = init match {
@@ -222,7 +231,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
           case _ if declaration.getDeclarators.isEmpty => Seq(astForNode(declaration))
         }
       case alias: CPPASTAliasDeclaration                   => Seq(astForAliasDeclaration(alias))
-      case functDef: IASTFunctionDefinition                => Seq(astForFunctionDefinition(functDef))
+      case functionDefinition: IASTFunctionDefinition      => Seq(astForFunctionDefinition(functionDefinition))
       case namespaceAlias: ICPPASTNamespaceAlias           => Seq(astForNamespaceAlias(namespaceAlias))
       case namespaceDefinition: ICPPASTNamespaceDefinition => Seq(astForNamespaceDefinition(namespaceDefinition))
       case a: ICPPASTStaticAssertDeclaration               => Seq(astForStaticAssert(a))
@@ -260,6 +269,14 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
       astsForDeclaration(d)
     }
 
+  private def filterNameAlias(
+    nameAlias: Option[String],
+    nameWithTemplateParams: Option[String],
+    fullName: String
+  ): Option[String] = {
+    (nameAlias.toList ++ nameWithTemplateParams.toList).filter(n => n != fullName).distinct.headOption
+  }
+
   private def astsForCompositeType(typeSpecifier: IASTCompositeTypeSpecifier, decls: List[IASTDeclarator]): Seq[Ast] = {
     val filename = fileName(typeSpecifier)
     val declAsts = decls.zipWithIndex.map { case (d, i) =>
@@ -272,7 +289,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
     val codeString                       = code(typeSpecifier)
     val nameAlias                        = decls.headOption.map(d => registerType(shortName(d))).filter(_.nonEmpty)
     val nameWithTemplateParams           = templateParameters(typeSpecifier).map(t => registerType(s"$fullName$t"))
-    val alias                            = (nameAlias.toList ++ nameWithTemplateParams.toList).headOption
+    val alias                            = filterNameAlias(nameAlias, nameWithTemplateParams, fullName)
 
     val typeDecl = typeSpecifier match {
       case cppClass: ICPPASTCompositeTypeSpecifier =>
@@ -319,7 +336,7 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
     val TypeFullNameInfo(name, fullName) = typeFullNameInfo(typeSpecifier)
     val nameAlias                        = decls.headOption.map(d => registerType(shortName(d))).filter(_.nonEmpty)
     val nameWithTemplateParams           = templateParameters(typeSpecifier).map(t => registerType(s"$fullName$t"))
-    val alias                            = (nameAlias.toList ++ nameWithTemplateParams.toList).headOption
+    val alias                            = filterNameAlias(nameAlias, nameWithTemplateParams, fullName)
     val typeDecl = typeDeclNode(typeSpecifier, name, fullName, filename, code(typeSpecifier), alias = alias)
     Ast(typeDecl) +: declAsts
   }
@@ -367,7 +384,8 @@ trait AstForTypesCreator(implicit withSchemaValidation: ValidationMode) { this: 
     val lineNumber                       = line(typeSpecifier)
     val columnNumber                     = column(typeSpecifier)
     val TypeFullNameInfo(name, fullName) = typeFullNameInfo(typeSpecifier)
-    val alias                            = decls.headOption.map(d => registerType(shortName(d))).filter(_.nonEmpty)
+    val nameAlias                        = decls.headOption.map(d => registerType(shortName(d))).filter(_.nonEmpty)
+    val alias                            = filterNameAlias(nameAlias, None, fullName)
 
     val (deAliasedName, deAliasedFullName, newAlias) = if (name.contains("anonymous_enum") && alias.isDefined) {
       (alias.get, fullName.substring(0, fullName.indexOf("anonymous_enum")) + alias.get, None)

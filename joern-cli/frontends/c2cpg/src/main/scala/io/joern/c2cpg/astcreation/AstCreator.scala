@@ -1,7 +1,7 @@
 package io.joern.c2cpg.astcreation
 
 import io.joern.c2cpg.Config
-import io.joern.x2cpg.datastructures.Scope
+import io.joern.c2cpg.parser.HeaderFileFinder
 import io.joern.x2cpg.datastructures.Stack.*
 import io.joern.x2cpg.{Ast, AstCreatorBase, ValidationMode, AstNodeBuilder as X2CpgAstNodeBuilder}
 import io.shiftleft.codepropertygraph.generated.NodeTypes
@@ -21,6 +21,7 @@ class AstCreator(
   val global: CGlobal,
   val config: Config,
   val cdtAst: IASTTranslationUnit,
+  val headerFileFinder: HeaderFileFinder,
   val file2OffsetTable: ConcurrentHashMap[String, Array[Int]]
 )(implicit withSchemaValidation: ValidationMode)
     extends AstCreatorBase(filename)
@@ -29,6 +30,7 @@ class AstCreator(
     with AstForPrimitivesCreator
     with AstForStatementsCreator
     with AstForExpressionsCreator
+    with AstForLambdasCreator
     with AstNodeBuilder
     with AstCreatorHelper
     with FullNameProvider
@@ -37,7 +39,7 @@ class AstCreator(
 
   protected val logger: Logger = LoggerFactory.getLogger(classOf[AstCreator])
 
-  protected val scope: Scope[String, (NewNode, String), NewNode] = new Scope()
+  protected val scope: C2CpgScope = new C2CpgScope()
 
   protected val usingDeclarationMappings: mutable.Map[String, String] = mutable.HashMap.empty
 

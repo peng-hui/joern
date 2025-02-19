@@ -6,6 +6,7 @@ import io.joern.c2cpg.astcreation.AstCreator
 import io.joern.c2cpg.astcreation.CGlobal
 import io.joern.c2cpg.parser.CdtParser
 import io.joern.c2cpg.parser.FileDefaults
+import io.joern.c2cpg.parser.HeaderFileFinder
 import io.joern.c2cpg.parser.JSONCompilationDatabaseParser
 import io.joern.c2cpg.parser.JSONCompilationDatabaseParser.CommandObject
 import io.joern.x2cpg.SourceFiles
@@ -31,12 +32,13 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
   private val logger: Logger = LoggerFactory.getLogger(classOf[AstCreationPass])
 
   private val global                                                  = new CGlobal()
+  private val headerFileFinder                                        = new HeaderFileFinder(config)
   private val file2OffsetTable: ConcurrentHashMap[String, Array[Int]] = new ConcurrentHashMap()
 
   private val compilationDatabase: mutable.LinkedHashSet[CommandObject] =
     config.compilationDatabase.map(JSONCompilationDatabaseParser.parse).getOrElse(mutable.LinkedHashSet.empty)
 
-  private val parser: CdtParser = new CdtParser(config, compilationDatabase)
+  private val parser: CdtParser = new CdtParser(config, headerFileFinder, compilationDatabase)
 
   def typesSeen(): List[String] = global.usedTypes.keys().asScala.toList
 
@@ -45,9 +47,10 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
   }
 
   private def sourceFilesFromDirectory(): Array[String] = {
-    val sourceFileExtensions = FileDefaults.SOURCE_FILE_EXTENSIONS
-      ++ FileDefaults.HEADER_FILE_EXTENSIONS
-      ++ Option.when(config.withPreprocessedFiles)(FileDefaults.PREPROCESSED_EXT).toList
+    val sourceFileExtensions =
+      FileDefaults.SourceFileExtensions ++
+        FileDefaults.HeaderFileExtensions ++
+        Option.when(config.withPreprocessedFiles)(FileDefaults.PreprocessedExt).toList
     val allSourceFiles = SourceFiles
       .determine(
         config.inputPath,
@@ -59,8 +62,8 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
       .toArray
     if (config.withPreprocessedFiles) {
       allSourceFiles.filter {
-        case f if !f.endsWith(FileDefaults.PREPROCESSED_EXT) =>
-          val fAsPreprocessedFile = s"${f.substring(0, f.lastIndexOf("."))}${FileDefaults.PREPROCESSED_EXT}"
+        case f if !FileDefaults.hasPreprocessedFileExtension(f) =>
+          val fAsPreprocessedFile = s"${f.substring(0, f.lastIndexOf("."))}${FileDefaults.PreprocessedExt}"
           !allSourceFiles.exists { sourceFile => f != sourceFile && sourceFile == fAsPreprocessedFile }
         case _ => true
       }
@@ -102,9 +105,10 @@ class AstCreationPass(cpg: Cpg, config: Config, report: Report = new Report())
         case Some(translationUnit) =>
           report.addReportInfo(relPath, fileLOC, parsed = true)
           Try {
-            val localDiff = new AstCreator(relPath, global, config, translationUnit, file2OffsetTable)(
-              config.schemaValidation
-            ).createAst()
+            val localDiff =
+              new AstCreator(relPath, global, config, translationUnit, headerFileFinder, file2OffsetTable)(
+                config.schemaValidation
+              ).createAst()
             diffGraph.absorb(localDiff)
           } match {
             case Failure(exception) =>

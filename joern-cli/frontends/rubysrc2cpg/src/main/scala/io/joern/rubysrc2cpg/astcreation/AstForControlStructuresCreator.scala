@@ -1,28 +1,30 @@
 package io.joern.rubysrc2cpg.astcreation
 
 import io.joern.rubysrc2cpg.astcreation.RubyIntermediateAst.{
+  ArrayLiteral,
   ArrayPattern,
   BinaryExpression,
   BreakExpression,
   CaseExpression,
   ControlFlowStatement,
   DoWhileExpression,
+  DummyAst,
   ElseClause,
   ForExpression,
   IfExpression,
   InClause,
+  IndexAccess,
   MatchVariable,
   MemberCall,
   NextExpression,
   OperatorAssignment,
   RescueExpression,
-  ReturnExpression,
   RubyExpression,
-  SimpleCall,
   SimpleIdentifier,
   SingleAssignment,
   SplattingRubyNode,
   StatementList,
+  StaticLiteral,
   UnaryExpression,
   Unknown,
   UnlessExpression,
@@ -30,18 +32,11 @@ import io.joern.rubysrc2cpg.astcreation.RubyIntermediateAst.{
   WhenClause,
   WhileExpression
 }
-import io.joern.rubysrc2cpg.parser.RubyJsonHelpers
 import io.joern.rubysrc2cpg.passes.Defines
 import io.joern.rubysrc2cpg.passes.Defines.RubyOperators
 import io.joern.x2cpg.{Ast, ValidationMode}
+import io.shiftleft.codepropertygraph.generated.nodes.{NewBlock, NewFieldIdentifier, NewLiteral, NewLocal}
 import io.shiftleft.codepropertygraph.generated.{ControlStructureTypes, DispatchTypes, Operators}
-import io.shiftleft.codepropertygraph.generated.nodes.{
-  NewBlock,
-  NewFieldIdentifier,
-  NewIdentifier,
-  NewLiteral,
-  NewLocal
-}
 
 trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMode) { this: AstCreator =>
 
@@ -163,18 +158,18 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
     scope.addToScope(node.forVariable.span.text, iterVarLocal)
 
     val idxName  = "_idx_"
-    val idxLocal = NewLocal().name(idxName).code(idxName).typeFullName(Defines.getBuiltInType(Defines.Integer))
+    val idxLocal = NewLocal().name(idxName).code(idxName).typeFullName(Defines.prefixAsCoreType(Defines.Integer))
     val idxIdenAtAssign = identifierNode(
       node = collectionNode,
       name = idxName,
       code = idxName,
-      typeFullName = Defines.getBuiltInType(Defines.Integer)
+      typeFullName = Defines.prefixAsCoreType(Defines.Integer)
     )
 
     val idxAssignment =
       callNode(node, s"$idxName = 0", Operators.assignment, Operators.assignment, DispatchTypes.STATIC_DISPATCH)
     val idxAssignmentArgs =
-      List(Ast(idxIdenAtAssign), Ast(NewLiteral().code("0").typeFullName(Defines.getBuiltInType(Defines.Integer))))
+      List(Ast(idxIdenAtAssign), Ast(NewLiteral().code("0").typeFullName(Defines.prefixAsCoreType(Defines.Integer))))
     val idxAssignmentAst = callAst(idxAssignment, idxAssignmentArgs)
 
     val idxIdAtCond = idxIdenAtAssign.copy
@@ -264,8 +259,11 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
             // `case when *x then c end`
             // which is translated to `x.include? y` and `x.any?` conditions respectively
 
-            val conditions = whenClause.matchExpressions.map { mExpr =>
-              expr.map(e => BinaryExpression(mExpr, "===", e)(mExpr.span)).getOrElse(mExpr)
+            val conditions = whenClause.matchExpressions.map {
+              case regex: StaticLiteral if regex.typeFullName == prefixAsCoreType(Defines.Regexp) =>
+                expr.map(e => BinaryExpression(regex, RubyOperators.regexpMatch, e)(regex.span)).getOrElse(regex)
+              case mExpr =>
+                expr.map(e => BinaryExpression(mExpr, "===", e)(mExpr.span)).getOrElse(mExpr)
             } ++ whenClause.matchSplatExpression.iterator.flatMap {
               case splat @ SplattingRubyNode(exprList) =>
                 expr
@@ -300,24 +298,27 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
                 val condition = expr.map(e => BinaryExpression(x, "===", e)(x.span)).getOrElse(inClause.pattern)
                 val body      = inClause.body
 
-                val variables = x.children.collect { case x: MatchVariable =>
-                  x
-                }
-
-                val conditionBody = if (variables.nonEmpty) {
-                  StatementList(variables.map { x =>
-                    val lhs = SimpleIdentifier()(x.span)
-                    SingleAssignment(lhs, "=", x)(
-                      inClause.span
-                        .spanStart(s"${lhs.span.text} = ${RubyOperators.arrayPatternMatch}(${lhs.span.text})")
+                val stmts = x.children.zipWithIndex.flatMap {
+                  case (lhs: MatchVariable, idx) if expr.isDefined =>
+                    val arrAccess = {
+                      val code = s"${expr.get.text}[$idx]"
+                      val base = expr.get.copy()(expr.get.span.spanStart(expr.get.text))
+                      val indices = StaticLiteral(Defines.prefixAsCoreType(Defines.Integer))(
+                        expr.get.span.spanStart(idx.toString)
+                      ) :: Nil
+                      IndexAccess(base, indices)(lhs.span.spanStart(code))
+                    }
+                    val asgn = SingleAssignment(lhs, "=", arrAccess)(
+                      inClause.span.spanStart(s"${lhs.span.text} = ${expr.get.text}[$idx]")
                     )
-                  } :+ body)(body.span)
-                } else {
-                  body
-                }
+                    Option(asgn)
+                  case _ => None
+                } :+ body
+                val conditionBody = StatementList(stmts)(body.span)
 
                 (condition, conditionBody)
-              case x => (x, inClause.body)
+              case x =>
+                (x, inClause.body)
             }
 
             val conditional = IfExpression(
@@ -332,16 +333,20 @@ trait AstForControlStructuresCreator(implicit withSchemaValidation: ValidationMo
       ifElseChain.iterator.toList
     }
 
-    def generatedNode: StatementList = node.expression
-      .map { e =>
-        val tmp = SimpleIdentifier(None)(e.span.spanStart(this.tmpGen.fresh))
-        StatementList(
-          List(SingleAssignment(tmp, "=", e)(e.span)) ++
-            goCase(Some(tmp))
-        )(node.span)
+    val caseExpr = node.expression
+      .map {
+        case arrayLiteral: ArrayLiteral =>
+          val tmp             = SimpleIdentifier(None)(arrayLiteral.span.spanStart(this.tmpGen.fresh))
+          val arrayLiteralAst = DummyAst(astForArrayLiteral(arrayLiteral))(arrayLiteral.span)
+          (tmp, arrayLiteralAst)
+        case e =>
+          val tmp = SimpleIdentifier(None)(e.span.spanStart(this.tmpGen.fresh))
+          (tmp, e)
       }
+      .map((tmp, e) => StatementList(List(SingleAssignment(tmp, "=", e)(e.span)) ++ goCase(Some(tmp)))(node.span))
       .getOrElse(StatementList(goCase(None))(node.span))
-    astsForStatement(generatedNode)
+
+    astsForStatement(caseExpr)
   }
 
   private def astForOperatorAssignmentExpression(node: OperatorAssignment): Ast = {

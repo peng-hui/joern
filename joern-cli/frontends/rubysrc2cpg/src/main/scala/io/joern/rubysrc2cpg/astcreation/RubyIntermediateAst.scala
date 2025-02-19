@@ -1,7 +1,10 @@
 package io.joern.rubysrc2cpg.astcreation
 
+import io.joern.rubysrc2cpg.passes.Defines.RubyOperators
 import io.joern.rubysrc2cpg.passes.{Defines, GlobalTypes}
+import io.joern.x2cpg.Ast
 import io.shiftleft.codepropertygraph.generated.nodes.NewNode
+import org.slf4j.LoggerFactory
 
 import java.util.Objects
 
@@ -295,8 +298,8 @@ object RubyIntermediateAst {
   final case class IfExpression(
     condition: RubyExpression,
     thenClause: RubyExpression,
-    elsifClauses: List[RubyExpression],
-    elseClause: Option[RubyExpression]
+    elsifClauses: List[RubyExpression] = Nil,
+    elseClause: Option[RubyExpression] = None
   )(span: TextSpan)
       extends RubyExpression(span)
       with ControlFlowStatement
@@ -348,7 +351,9 @@ object RubyIntermediateAst {
 
   final case class ArrayPattern(children: List[RubyExpression])(span: TextSpan) extends RubyExpression(span)
 
-  final case class MatchVariable()(span: TextSpan) extends RubyExpression(span)
+  final case class MatchVariable()(span: TextSpan) extends RubyExpression(span) {
+    def toSimpleIdentifier: SimpleIdentifier = SimpleIdentifier()(span)
+  }
 
   final case class NextExpression()(span: TextSpan) extends RubyExpression(span) with ControlFlowStatement
 
@@ -371,7 +376,7 @@ object RubyIntermediateAst {
   final case class TypeIdentifier(typeFullName: String)(span: TextSpan)
       extends RubyExpression(span)
       with RubyIdentifier {
-    def isBuiltin: Boolean        = typeFullName.startsWith(GlobalTypes.builtinPrefix)
+    def isBuiltin: Boolean        = typeFullName.startsWith(GlobalTypes.corePrefix)
     override def toString: String = s"TypeIdentifier(${span.text}, $typeFullName)"
   }
 
@@ -404,6 +409,25 @@ object RubyIntermediateAst {
         case s                                    => s
       }
     }
+
+  }
+
+  object StaticLiteral {
+
+    private val logger = LoggerFactory.getLogger(getClass)
+
+    def unapply(literal: StaticLiteral): Option[String] = {
+      val typeName = literal.typeFullName.stripPrefix(s"${GlobalTypes.corePrefix}.")
+      Some(typeName).filter(GlobalTypes.bundledClasses.contains) match {
+        case None =>
+          logger.warn(
+            s"Unapply called on static literal with type not contained within known bundled classes: ${literal.typeFullName}"
+          )
+          Some(literal.typeFullName)
+        case x => x
+      }
+
+    }
   }
 
   final case class DynamicLiteral(typeFullName: String, expressions: List[RubyExpression])(span: TextSpan)
@@ -430,12 +454,12 @@ object RubyIntermediateAst {
 
     def isStatic: Boolean = !isDynamic
 
-    def typeFullName: String = Defines.getBuiltInType(Defines.Array)
+    def typeFullName: String = Defines.prefixAsCoreType(Defines.Array)
   }
 
   sealed trait HashLike extends RubyExpression with LiteralExpr {
     def elements: List[RubyExpression]
-    def typeFullName: String = Defines.getBuiltInType(Defines.Hash)
+    def typeFullName: String = Defines.prefixAsCoreType(Defines.Hash)
   }
 
   final case class HashLiteral(elements: List[RubyExpression])(span: TextSpan)
@@ -544,6 +568,10 @@ object RubyIntermediateAst {
     span: TextSpan
   ) extends RubyExpression(span)
       with RubyCall {
+
+    def isRegexMatch: Boolean =
+      methodName == RubyOperators.regexpMatch || methodName.endsWith(Defines.NeedsRegexLowering)
+
     override def withBlock(block: Block): RubyCallWithBlock[?] =
       MemberCallWithBlock(target, op, methodName, arguments, block)(span)
   }
@@ -618,6 +646,10 @@ object RubyIntermediateAst {
   /** A dummy class for wrapping around `NewNode` and allowing it to integrate with RubyNode classes.
     */
   final case class DummyNode(node: NewNode)(span: TextSpan) extends RubyExpression(span)
+
+  /** A dummy class for wrapping around `Ast` and allowing it to integrate with RubyNode classes.
+    */
+  final case class DummyAst(ast: Ast)(span: TextSpan) extends RubyExpression(span)
 
   final case class UnaryExpression(op: String, expression: RubyExpression)(span: TextSpan) extends RubyExpression(span)
 

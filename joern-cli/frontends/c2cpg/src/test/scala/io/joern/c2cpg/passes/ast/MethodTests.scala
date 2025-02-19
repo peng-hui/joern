@@ -407,7 +407,7 @@ class MethodTests extends C2CpgSuite {
       )
       val List(implicitThisParam) = cpg.method.name("meth").parameter.l
       implicitThisParam.name shouldBe "this"
-      implicitThisParam.typeFullName shouldBe "A"
+      implicitThisParam.typeFullName shouldBe "A*"
       val List(trueVarAccess) = cpg.call.name(Operators.equals).argument.argumentIndex(1).isCall.l
       trueVarAccess.code shouldBe "this->var"
       trueVarAccess.name shouldBe Operators.indirectFieldAccess
@@ -429,6 +429,27 @@ class MethodTests extends C2CpgSuite {
       thisId._refOut.l shouldBe List(implicitThisParam)
       varFieldIdent.code shouldBe "var"
       varFieldIdent.isFieldIdentifier shouldBe true
+    }
+
+    "be correct for class method in nested class" in {
+      val cpg = code(
+        """class Outer {
+          |  class Inner {
+          |    void Method();
+          |    int member;
+          | };
+          |};
+          |void Outer::Inner::Method() {
+          |  member;
+          |}""".stripMargin,
+        "test.cpp"
+      )
+      cpg.identifier.name("member").size shouldBe 0
+      val List(memberCall) = cpg.call.codeExact("this->member").l
+      memberCall.typeFullName shouldBe "int"
+      memberCall.name shouldBe Operators.indirectFieldAccess
+      memberCall.argument.isIdentifier.typeFullName.l shouldBe List("Outer.Inner*")
+      memberCall.argument.isFieldIdentifier.code.l shouldBe List("member")
     }
   }
 }
